@@ -74,10 +74,10 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
 
-IMAGE_NAME="${IMAGE_NAME:-ubtech:v0}"
+IMAGE_NAME="${IMAGE_NAME:-ghrc_2026:v0}"
 CONTAINER_NAME="${CONTAINER_NAME:-isaac_sim_lerobot_ubt}"
 HOST_WORKSPACE="${HOST_WORKSPACE:-${PROJECT_ROOT}}"
-CONTAINER_WORKSPACE="${CONTAINER_WORKSPACE:-/workspace/GlobalHumanoidRobotChallenge2026_Baseline}"
+CONTAINER_WORKSPACE="${CONTAINER_WORKSPACE:-/workspace/GlobalHumanoidRobotChallenge_2026_Baseline}"
 SHM_SIZE="${SHM_SIZE:-8g}"
 
 # Isaac Sim 缓存目录（持久化挂载，避免每次启动重新编译 shader / 下载资产）

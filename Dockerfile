@@ -3,7 +3,7 @@ FROM ${BASE_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG APP_DIR=/workspace/GlobalHumanoidRobotChallenge2026_Baseline
+ARG APP_DIR=/workspace/GlobalHumanoidRobotChallenge_2026_Baseline
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG CN_PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
