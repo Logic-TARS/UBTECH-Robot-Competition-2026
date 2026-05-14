@@ -438,10 +438,10 @@ class WalkerS2sim(Robot):
                 self._hold_finger_positions = np.array([self._robot_interface.gripper_open_width]*4)
                 # self._hold_finger_positions = abs_action[14:18].copy()
             if abs_action.shape[0] >= 20:
-                self._left_gripping = float(abs_action[18]) < -0.5
+                self._left_gripping = float(abs_action[18]) > 0.5
                 if self._left_gripping:
                     self._hold_finger_positions[:2] = np.array([self._robot_interface.gripper_close_width]*2)
-                self._right_gripping = float(abs_action[19]) < -0.5
+                self._right_gripping = float(abs_action[19]) > 0.5
                 if self._right_gripping:
                     self._hold_finger_positions[2:4] = np.array([self._robot_interface.gripper_close_width]*2)
             print(f"[_robot_control_callback] left_gripping={self._left_gripping}, right_gripping={self._right_gripping}")
@@ -853,8 +853,8 @@ class WalkerS2sim(Robot):
                         "L_finger2_joint.pos": finger_pos[1],
                         "R_finger1_joint.pos": finger_pos[2],
                         "R_finger2_joint.pos": finger_pos[3],
-                        "left_gripper": -1.0 if self._left_gripping else 1.0,
-                        "right_gripper": -1.0 if self._right_gripping else 1.0,
+                        "left_gripper": 1.0 if self._left_gripping else -1.0,
+                        "right_gripper": 1.0 if self._right_gripping else -1.0,
                     }
                 else:
                     raise RuntimeError("无法获取关节状态以构建 action 字典")
@@ -918,8 +918,8 @@ class WalkerS2sim(Robot):
                     obs[f"{joint_name}.pos"] = torch.tensor(finger_pos[i], dtype=torch.float32)
 
                 # 2 夹持器控制
-                obs["left_gripper"] = torch.tensor(-1.0 if self._left_gripping else 1.0, dtype=torch.float32)
-                obs["right_gripper"] = torch.tensor(-1.0 if self._right_gripping else 1.0, dtype=torch.float32)
+                obs["left_gripper"] = torch.tensor(1.0 if self._left_gripping else -1.0, dtype=torch.float32)
+                obs["right_gripper"] = torch.tensor(1.0 if self._right_gripping else -1.0, dtype=torch.float32)
             else:
                 raise RuntimeError("无法获取关节状态")
 

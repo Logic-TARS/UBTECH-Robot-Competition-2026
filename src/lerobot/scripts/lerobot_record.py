@@ -466,8 +466,6 @@ def record_loop(
                     robot_action_to_send[key] = float(value)
                 for key, value in zip(walker_left_arm_keys, smoothed_left_arm):
                     robot_action_to_send[key] = float(value)
-        robot_action_to_send['left_gripper'] = -robot_action_to_send.get('left_gripper', 1)
-        robot_action_to_send['right_gripper'] = -robot_action_to_send.get('right_gripper', 1)
         _sent_action = robot.send_action(robot_action_to_send)
         # policy.reset()
         action_values = _sent_action
