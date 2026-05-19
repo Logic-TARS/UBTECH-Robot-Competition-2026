@@ -1,0 +1,16 @@
+# infer 容器配置 — task 通过 --task CLI 参数覆盖
+task: task4
+device: cuda:0
+
+adapter_type: lerobot
+adapter_class:
+adapter_config: {}
+
+policy_type: act
+
+websocket_server_host: 0.0.0.0
+websocket_control_port: 8765
+websocket_stream_port: 8766
+heartbeat_interval: 5.0
+connection_timeout: 30.0
+websocket_max_size_bytes: null

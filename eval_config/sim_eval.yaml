@@ -1,0 +1,19 @@
+# sim-eval 容器配置 — task 通过 --task CLI 参数覆盖
+task: task4
+device: auto
+num_episodes: 1
+print_every: 20
+enable_assertion: true
+auto_start: true
+
+log_dir: logs/sim_eval_container
+action_wait_timeout: 10.0
+reset_retries: 3
+
+sim_infer_host: localhost
+sim_infer_control_port: 8765
+sim_infer_stream_port: 8766
+heartbeat_interval: 5.0
+connection_timeout: 30.0
+websocket_max_size_bytes: null
+color_logs: true
