@@ -93,7 +93,6 @@ tests/outputs/
 # 其他
 *.log
 .cache/
-docs/
 *.json
 .codex
 .github
