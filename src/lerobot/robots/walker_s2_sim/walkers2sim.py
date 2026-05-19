@@ -555,6 +555,12 @@ class WalkerS2sim(Robot):
         if callable(get_transforms):
             get_transforms(step_size)
 
+    def get_box_joints(self):
+        """Get box joint positions for Task4 assertion."""
+        if self._scene_builder is not None and hasattr(self._scene_builder, 'box_articulation'):
+            return self._scene_builder.box_articulation.get_joint_positions()
+        return None
+
     def _foam_sync_callback(self, _step_size: float) -> None:
         """task4 专用：同步泡沫到箱子"""
         if self._scene_builder is None:
