@@ -9,11 +9,12 @@ infer 侧：模型加载、推理、policy reset
 from __future__ import annotations
 
 from .const import (
-    TASK_DEFAULT_POLICY_PATH,
     DEFAULT_ORI_THRESHOLD,
     DEFAULT_POS_THRESHOLD,
+    TASK_CHOICES,
     TASK_DEFAULT_CONFIG_PATH,
     TASK_DEFAULT_MAX_STEPS,
+    TASK_DEFAULT_POLICY_PATH,
     TASK_DEFAULT_TEXT,
     TASK_MAX_STEPS,
     TaskNameLiteral,
@@ -21,6 +22,7 @@ from .const import (
 from .container_config import load_container_config, require_config_keys
 
 __all__ = [
+    "TASK_CHOICES",
     "TASK_MAX_STEPS",
     "TASK_DEFAULT_TEXT",
     "TASK_DEFAULT_MAX_STEPS",
@@ -96,6 +98,7 @@ try:
     from .terminal import (
         check_step_terminal,
         task1_check_parts_out_of_workspace,
+        task2_check_all_parts_lost,
         task3_check_terminal,
         task4_check_box_poses_terminal,
     )
@@ -113,6 +116,7 @@ try:
             "build_workspace_limits",
             "check_step_terminal",
             "task1_check_parts_out_of_workspace",
+            "task2_check_all_parts_lost",
             "task3_check_terminal",
             "task4_check_box_poses_terminal",
             "task1_check_parts_in_box",

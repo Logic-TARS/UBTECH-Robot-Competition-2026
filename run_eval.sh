@@ -3,8 +3,8 @@
 #  评估脚本 — 支持两种模式
 #
 #  用法:
-#    ./run_eval.sh task4                    # 默认单容器模式，评估 task4
-#    ./run_eval.sh all                      # 依次评估全部 4 个任务
+#    ./run_eval.sh task4                    # 评估 task4
+#    ./run_eval.sh all                      # 评估所有任务
 #    ./run_eval.sh task4 --mode dual        # 双容器模式（需多 GPU）
 #
 #  环境变量:
@@ -54,6 +54,8 @@ mkdir -p "${HF_CACHE}"
 
 PIP_MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
 PIP_INIT="/isaac-sim/python.sh -m pip install -i ${PIP_MIRROR} -e . --no-deps -q && /isaac-sim/python.sh -m pip install -i ${PIP_MIRROR} lz4 msgpack -q"
+# infer 用 Isaac Sim 裸 Python，不启 app（避免双 Isaac Sim 争 GPU）
+INFER_PYTHON="source /isaac-sim/setup_python_env.sh && LD_PRELOAD=/isaac-sim/kit/libcarb.so /isaac-sim/kit/python/bin/python3"
 
 # ========================== 共享挂载参数 ==========================
 COMMON_MOUNTS=(
@@ -88,9 +90,9 @@ run_single() {
         "${IMAGE_NAME}" \
         -c "
             ${PIP_INIT}
-            echo '[INIT] infer 启动...'
-            /isaac-sim/python.sh -m lerobot.scripts.sim_infer_container --config ${infer_cfg} &
-            sleep 40
+            echo '[INIT] infer 启动（裸 Python）...'
+            ${INFER_PYTHON} -m lerobot.scripts.sim_infer_container --config ${infer_cfg} &
+            sleep 20
             echo '[INIT] sim-eval 启动...'
             /isaac-sim/python.sh -m lerobot.scripts.sim_eval_container --config ${sim_cfg}
         " 2>&1 \
@@ -124,9 +126,9 @@ run_dual() {
         --privileged --user root --gpus all --shm-size=8g \
         "${COMMON_MOUNTS[@]}" \
         "${IMAGE_NAME}" \
-        -c "${PIP_INIT} && exec /isaac-sim/python.sh -m lerobot.scripts.sim_infer_container --config ${infer_cfg}"
+        -c "${PIP_INIT} && exec ${INFER_PYTHON} -m lerobot.scripts.sim_infer_container --config ${infer_cfg}"
 
-    sleep 30
+    sleep 20
     if ! docker ps --format '{{.Names}}' | grep -q sim-infer; then
         error "sim-infer 启动失败"; docker logs sim-infer 2>&1 | grep -iE "error|traceback" | tail -5
         return 1

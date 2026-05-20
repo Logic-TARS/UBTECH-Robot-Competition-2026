@@ -29,6 +29,7 @@ from src.lerobot.sim_eval import (
     EpisodeResult,
     InferenceSummary,
     NoOpAssertion,
+    TASK_CHOICES,
     TASK_DEFAULT_MAX_STEPS,
     TASK_DEFAULT_CONFIG_PATH,
     TASK_DEFAULT_TEXT,

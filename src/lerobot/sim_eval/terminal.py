@@ -69,6 +69,21 @@ def task1_check_parts_out_of_workspace(
     return False
 
 
+def task2_check_all_parts_lost(
+    parts_poses_dict: Any,
+    conveyor_z_min: float,
+) -> bool:
+    """Task2 终止条件之一：所有零件都掉落到传送带以下，无可操作对象。"""
+    parts = iter_part_dicts(parts_poses_dict)
+    if not parts:
+        return False
+    for part in parts:
+        pos = safe_vec3(part.get("position"))
+        if pos is not None and pos[2] >= float(conveyor_z_min):
+            return False
+    return True
+
+
 def check_step_terminal(step: int, max_steps: int) -> bool:
     """检查是否达到最大步数。"""
     if max_steps is None:

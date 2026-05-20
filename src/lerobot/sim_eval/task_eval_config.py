@@ -113,13 +113,18 @@ def _build_task2_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -
         "y": [center[1] - size[1], center[1] + size[1]],
         "z": [plane_position[2] - 0.1, plane_position[2] + 0.1],
     }
+    max_parts = int(evaluation.get("max_parts", task_config.get("part", {}).get("num_parts", 5) * 2))
+    grab_score_per_part = int(evaluation.get("grab_score_per_part", 10))
+    sort_score_per_part = int(evaluation.get("sort_score_per_part", 10))
+    # 基础分满分 = 抓取(max_parts*10) + 分拣(max_parts*10)，门槛默认 75%
+    max_base = max_parts * grab_score_per_part + max_parts * sort_score_per_part
     return {
         "task2_conveyor_limits": evaluation.get("conveyor_limits", default_conveyor_limits),
         "task2_bin_half_size": evaluation.get("bin_half_size", [box_scale[0] / 2.0, box_scale[1] / 2.0, box_scale[2] / 2.0]),
-        "task2_grab_score_per_part": int(evaluation.get("grab_score_per_part", 10)),
-        "task2_sort_score_per_part": int(evaluation.get("sort_score_per_part", 15)),
-        "task2_max_parts": int(evaluation.get("max_parts", task_config.get("part", {}).get("num_parts", 5))),
-        "task2_success_score_threshold": int(evaluation.get("success_score_threshold", 100)),
+        "task2_grab_score_per_part": grab_score_per_part,
+        "task2_sort_score_per_part": sort_score_per_part,
+        "task2_max_parts": max_parts,
+        "task2_success_score_threshold": int(evaluation.get("success_score_threshold", int(max_base * 0.75))),
     }
 
 
@@ -132,7 +137,7 @@ def _build_task3_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -
         "task3_workspace_limits": evaluation.get("workspace_limits", default_workspace_limits),
         "task3_dist_threshold": float(evaluation.get("dist_threshold", 0.05)),
         "task3_height_threshold": float(evaluation.get("height_threshold", 0.1)),
-        "task3_success_score_threshold": int(evaluation.get("success_score_threshold", 100)),
+        "task3_success_score_threshold": int(evaluation.get("success_score_threshold", 90)),
     }
 
 

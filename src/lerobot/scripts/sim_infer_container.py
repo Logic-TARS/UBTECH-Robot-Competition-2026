@@ -28,6 +28,7 @@ import torch
 from src.lerobot.sim_eval import (
     InferenceContext,
     ResetContext,
+    TASK_CHOICES,
     TASK_DEFAULT_CONFIG_PATH,
     TASK_DEFAULT_MAX_STEPS,
     TASK_DEFAULT_POLICY_PATH,
@@ -382,7 +383,8 @@ def parse_args() -> argparse.Namespace:
         args.task_config_path = str(Path(TASK_DEFAULT_CONFIG_PATH[args.task]).resolve())
     args.task_text = str(getattr(args, "task_text", "") or TASK_DEFAULT_TEXT.get(args.task, args.task))
     args.max_steps = int(getattr(args, "max_steps", TASK_DEFAULT_MAX_STEPS.get(args.task, 1000)))
-    if str(getattr(args, "adapter_type", "lerobot")).lower() == "lerobot" and not getattr(args, "adapter_class", None):
+    adapter_type = str(getattr(args, "adapter_type", "lerobot")).lower()
+    if adapter_type == "lerobot" and not getattr(args, "adapter_class", None):
         require_config_keys(args, ["policy_type"], "infer 容器配置")
         if not getattr(args, "policy_path", None) and args.task in TASK_DEFAULT_POLICY_PATH:
             args.policy_path = str(Path(TASK_DEFAULT_POLICY_PATH[args.task]))

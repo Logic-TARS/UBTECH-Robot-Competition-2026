@@ -262,5 +262,4 @@ def create_policy_adapter(
     normalized_type = adapter_type.lower().strip()
     if normalized_type == "lerobot":
         return LeRobotPolicyAdapter()
-
     raise ValueError(f"不支持的 adapter_type：{adapter_type}")

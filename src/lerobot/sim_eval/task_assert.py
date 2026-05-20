@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from .common import WalkerS2sim
-from .terminal import check_step_terminal, task1_check_parts_out_of_workspace, task3_check_terminal, task4_check_box_poses_terminal
+from .terminal import check_step_terminal, task1_check_parts_out_of_workspace, task2_check_all_parts_lost, task3_check_terminal, task4_check_box_poses_terminal
 from .scoring import (
     task1_check_parts_in_box,
     task1_check_parts_in_lift,
@@ -361,8 +361,10 @@ class Task1Assertion(TaskAssertion):
 class Task2Assertion(TaskAssertion):
     """
     Task2（传送带分拣）成功判据：
-    - 成功：抓取并分拣指定数量的工件到正确料箱
-    - 终止：超时
+    - 基础分 = 抓取分(grab) + 分拣分(sort)，满分 200
+    - 成功：基础分 ≥ 门槛（默认 150，即 75%，参考 Task1）
+    - 最终得分 = 分拣分（官方标准，max 100）
+    - 终止：超时 / 所有零件掉落传送带以下
     """
     def __init__(
         self,
@@ -442,24 +444,26 @@ class Task2Assertion(TaskAssertion):
                 max_parts=self._max_parts,
             )
 
-            # 计算总分
-            score_info = task2_calculate_total_score(
-                grab_score=grab_score,
-                sort_score=sort_score,
-                max_grab_score=self._grab_score_per_part * self._max_parts,
-                max_sort_score=self._sort_score_per_part * self._max_parts,
-            )
+            # 基础分 = 抓取分 + 分拣分（满分 200），参考 Task1 两段式设计
+            base_score = int(grab_score + sort_score)
+            # 最终得分 = 分拣分（官方标准，max 100），抓取分仅用于成功判定
+            total_score = int(sort_score)
 
-            total_score = score_info["total_score"]
-            is_success = int(total_score) >= self._success_score_threshold
+            is_success = base_score >= self._success_score_threshold
 
-            # 终止条件：超时
+            # 终止条件：超时 / 所有零件掉落传送带以下
             max_steps = extra_info.get("max_steps", 1000) if extra_info else 1000
-            terminal = check_step_terminal(step, int(max_steps))
+            terminal_time = check_step_terminal(step, int(max_steps))
+            terminal_lost = task2_check_all_parts_lost(
+                parts_poses_dict=parts_poses,
+                conveyor_z_min=float(self._conveyor_limits["z"][0]),
+            )
+            terminal = terminal_time or terminal_lost
 
             metrics = {
                 "task2_grab_score": int(grab_score),
                 "task2_sort_score": int(sort_score),
+                "task2_base_score": int(base_score),
                 "task2_total_score": int(total_score),
                 "task2_grab_scored_count": int(len(self._grab_scored_parts)),
                 "task2_sort_scored_count": int(len(self._sort_scored_parts)),
@@ -467,13 +471,17 @@ class Task2Assertion(TaskAssertion):
                 "task2_success_score_threshold": int(self._success_score_threshold),
                 "task2_grab_details": grab_details,
                 "task2_sort_details": sort_details,
+                "task2_terminal_time": bool(terminal_time),
+                "task2_terminal_lost": bool(terminal_lost),
                 "is_success": bool(is_success),
                 "terminal": bool(terminal),
             }
 
             if is_success:
-                reason = f"Success！！！，总分达到{self._success_score_threshold}"
-            elif terminal:
+                reason = f"Success！！！，基础分{base_score}达到门槛{self._success_score_threshold}（分拣分{total_score}）"
+            elif terminal_lost:
+                reason = "Terminal！！！，所有零件掉落传送带以下"
+            elif terminal_time:
                 reason = "Terminal！！！，达到最大步数时间限制"
             else:
                 reason = "进行中"
