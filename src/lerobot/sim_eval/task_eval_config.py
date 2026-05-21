@@ -113,6 +113,10 @@ def _build_task2_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -
         "y": [center[1] - size[1], center[1] + size[1]],
         "z": [plane_position[2] - 0.1, plane_position[2] + 0.1],
     }
+    conveyor_belt_position = _get_first_vector(
+        task_config.get("ConveyorBelt", {}).get("ConveyorBelt_position"),
+        plane_position,
+    )
     max_parts = int(evaluation.get("max_parts", task_config.get("part", {}).get("num_parts", 5) * 2))
     grab_score_per_part = int(evaluation.get("grab_score_per_part", 10))
     sort_score_per_part = int(evaluation.get("sort_score_per_part", 10))
@@ -120,6 +124,7 @@ def _build_task2_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -
     max_base = max_parts * grab_score_per_part + max_parts * sort_score_per_part
     return {
         "task2_conveyor_limits": evaluation.get("conveyor_limits", default_conveyor_limits),
+        "task2_conveyor_drop_z": float(evaluation.get("conveyor_drop_z", conveyor_belt_position[2])),
         "task2_bin_half_size": evaluation.get("bin_half_size", [box_scale[0] / 2.0, box_scale[1] / 2.0, box_scale[2] / 2.0]),
         "task2_grab_score_per_part": grab_score_per_part,
         "task2_sort_score_per_part": sort_score_per_part,

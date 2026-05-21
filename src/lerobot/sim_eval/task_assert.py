@@ -369,6 +369,7 @@ class Task2Assertion(TaskAssertion):
     def __init__(
         self,
         conveyor_limits: dict[str, tuple[float, float]],
+        conveyor_drop_z: float,
         bin_half_size: tuple[float, float, float],
         grab_score_per_part: int,
         sort_score_per_part: int,
@@ -376,6 +377,7 @@ class Task2Assertion(TaskAssertion):
         success_score_threshold: int,
     ):
         self._conveyor_limits = conveyor_limits
+        self._conveyor_drop_z = float(conveyor_drop_z)
         if len(bin_half_size) != 3:
             raise ValueError("task2_bin_half_size 必须包含 3 个元素: [x, y, z]")
         self._bin_half_size: tuple[float, float, float] = (
@@ -456,7 +458,7 @@ class Task2Assertion(TaskAssertion):
             terminal_time = check_step_terminal(step, int(max_steps))
             terminal_lost = task2_check_all_parts_lost(
                 parts_poses_dict=parts_poses,
-                conveyor_z_min=float(self._conveyor_limits["z"][0]),
+                conveyor_z_min=self._conveyor_drop_z,
             )
             terminal = terminal_time or terminal_lost
 
@@ -863,6 +865,7 @@ def create_task_assertion(task: str, args) -> TaskAssertion:
                 "y": (float(conveyor_limits["y"][0]), float(conveyor_limits["y"][1])),
                 "z": (float(conveyor_limits["z"][0]), float(conveyor_limits["z"][1])),
             },
+            conveyor_drop_z=float(getattr(args, "task2_conveyor_drop_z")),
             bin_half_size=tuple(getattr(args, "task2_bin_half_size")),
             grab_score_per_part=int(getattr(args, "task2_grab_score_per_part")),
             sort_score_per_part=int(getattr(args, "task2_sort_score_per_part")),
