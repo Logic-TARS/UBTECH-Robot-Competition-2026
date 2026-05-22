@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""`infer` 容器入口：策略推理 + policy reset + WebSocket 服务。
+"""GHRC 2026 评估系统 — 推理容器入口。
 
-本文件用于双容器评测方案中的 `infer` 容器，只负责接收 `sim-eval` 容器发送的
-完整 observation、执行推理，并在 episode 结束时调用统一的 policy reset 接口。
+负责接收仿真容器发送的 observation、执行模型推理、返回 action，
+episode 结束时调用 policy reset。
 
 使用示例:
 
 ```bash
-python -m lerobot.scripts.sim_infer_container
-python -m lerobot.scripts.sim_infer_container --config eval_config/task4_infer.yaml
+python -m lerobot.scripts.ghrc_eval_infer
+python -m lerobot.scripts.ghrc_eval_infer --config eval_config/eval_infer.yaml --task task4
 ```
 """
 
@@ -350,7 +350,7 @@ def parse_args() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser(description="infer 容器入口")
-    parser.add_argument("--config", type=str, default="eval_config/infer.yaml", help="配置文件路径")
+    parser.add_argument("--config", type=str, default="eval_config/eval_infer.yaml", help="配置文件路径")
     parser.add_argument("--task", type=str, default=None, choices=TASK_CHOICES, help="覆盖任务名")
     cli_args = parser.parse_args()
 

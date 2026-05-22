@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""`sim-eval` 容器入口：仿真、数采与评测。
+"""GHRC 2026 评估系统 — 仿真评测容器入口。
 
-本文件用于双容器评测方案中的 `sim-eval` 容器，只负责仿真环境、资产加载、
-observation 采集、episode 生命周期管理与断言评测，不直接加载 policy。
+负责 Isaac Sim 仿真、机器人控制、observation 采集、episode 生命周期管理与断言评测。
+通过 WebSocket 连接推理容器获取 action，不直接加载 policy。
 
 使用示例:
 
 ```bash
-python -m lerobot.scripts.sim_eval_container
-python -m lerobot.scripts.sim_eval_container --config eval_config/${task}_sim_eval.yaml
+python -m lerobot.scripts.ghrc_eval_sim
+python -m lerobot.scripts.ghrc_eval_sim --config eval_config/eval_sim.yaml --task task4
 ```
 """
 
@@ -456,7 +456,7 @@ def parse_args() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser(description="sim-eval 容器入口")
-    parser.add_argument("--config", type=str, default="eval_config/sim_eval.yaml", help="配置文件路径")
+    parser.add_argument("--config", type=str, default="eval_config/eval_sim.yaml", help="配置文件路径")
     parser.add_argument("--task", type=str, default=None, choices=TASK_CHOICES, help="覆盖任务名")
     cli_args = parser.parse_args()
 

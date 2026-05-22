@@ -1,6 +1,6 @@
 # infer 容器配置 — task 通过 --task CLI 参数覆盖
 task: task4
-device: cuda:0
+device: cpu
 
 adapter_type: lerobot
 adapter_class:
