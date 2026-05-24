@@ -3,8 +3,8 @@ FROM ${BASE_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG APP_DIR=/workspace/GlobalHumanoidRobotChallenge_2026_Baseline
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG APP_DIR=/workspace/GlobalHumanoidRobotChallenge2026_Baseline
+ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG CN_PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -60,8 +60,7 @@ RUN /isaac-sim/python.sh -m pip install --no-cache-dir -i ${PIP_INDEX_URL} \
     "accelerate" \
     "num2words" \
     "pytest>=8.1.0" \
-    && /isaac-sim/python.sh -m pip install --no-cache-dir -i ${PIP_INDEX_URL} --no-deps "pynput>=1.7.7" \
-    && /isaac-sim/python.sh -m pip install --no-cache-dir -i ${PIP_INDEX_URL} "msgpack>=1.0.0" "lz4>=4.0.0"
+    && /isaac-sim/python.sh -m pip install --no-cache-dir -i ${PIP_INDEX_URL} --no-deps "pynput>=1.7.7"
 
 WORKDIR ${APP_DIR}
 
