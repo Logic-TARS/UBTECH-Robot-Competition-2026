@@ -7,6 +7,75 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
+read_yaml_scalar() {
+    local file="$1"
+    local key="$2"
+    local default_value="$3"
+    local value
+    value="$(
+        awk -F':' -v key="$key" '
+            $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+                sub(/^[[:space:]]+/, "", $2)
+                sub(/[[:space:]]+$/, "", $2)
+                print $2
+                exit
+            }
+        ' "$file" 2>/dev/null || true
+    )"
+    [[ -n "${value}" ]] && echo "${value}" || echo "${default_value}"
+}
+
+is_port_listening() {
+    local port="$1"
+    if command -v ss &>/dev/null; then
+        ss -lnt "( sport = :${port} )" 2>/dev/null | tail -n +2 | grep -q ":${port}[[:space:]]"
+    else
+        netstat -lnt 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${port}$"
+    fi
+}
+
+print_infer_log_tail() {
+    local task="$1"
+    local log_file="/tmp/eval_infer_${task}.log"
+    if [[ -f "${log_file}" ]]; then
+        error "infer 日志尾部 (${log_file}):"
+        tail -n 80 "${log_file}" >&2 || true
+    else
+        error "未找到 infer 日志: ${log_file}"
+    fi
+}
+
+wait_for_infer_ready() {
+    local task="$1"
+    local infer_name="$2"
+    local control_port="$3"
+    local stream_port="$4"
+    local timeout_seconds="$5"
+    local start_ts
+    start_ts="$(date +%s)"
+
+    while true; do
+        if ! docker inspect -f '{{.State.Running}}' "${infer_name}" >/dev/null 2>&1; then
+            error "infer 容器 ${infer_name} 已退出"
+            print_infer_log_tail "${task}"
+            return 1
+        fi
+
+        if is_port_listening "${control_port}" && is_port_listening "${stream_port}"; then
+            info "infer 已就绪: control=${control_port}, stream=${stream_port}"
+            return 0
+        fi
+
+        if (( $(date +%s) - start_ts >= timeout_seconds )); then
+            error "等待 infer 就绪超时 (${timeout_seconds}s)，端口 ${control_port}/${stream_port} 未监听"
+            print_infer_log_tail "${task}"
+            return 1
+        fi
+
+        sleep 2
+    done
+}
+
 TASK="${1:-all}"
 ALL_TASKS=("task4" "task1" "task2" "task3")
 [[ "$TASK" == "all" ]] && TASKS=("${ALL_TASKS[@]}") || TASKS=("$TASK")
@@ -20,6 +89,11 @@ ISAAC_CACHE="${ISAAC_CACHE_ROOT:-${HOME}/.cache/isaac_sim_container}"
 HF_CACHE="${HF_CACHE:-${HOME}/.cache/huggingface}"
 HEADLESS="${HEADLESS:-0}"
 PIP_MIRROR="${PIP_MIRROR:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+INFER_CONFIG="${INFER_CONFIG:-eval_config/eval_infer.yaml}"
+SIM_CONFIG="${SIM_CONFIG:-eval_config/eval_sim.yaml}"
+INFER_CONTROL_PORT="$(read_yaml_scalar "${INFER_CONFIG}" "websocket_control_port" "8765")"
+INFER_STREAM_PORT="$(read_yaml_scalar "${INFER_CONFIG}" "websocket_stream_port" "8766")"
+INFER_READY_TIMEOUT="${INFER_READY_TIMEOUT:-300}"
 
 info "infer: ${INFER_IMAGE}  |  sim: ${SIM_IMAGE}  |  任务: ${TASKS[*]}"
 
@@ -38,8 +112,8 @@ INFER_PY="source /isaac-sim/setup_python_env.sh && LD_PRELOAD=/isaac-sim/kit/lib
 
 run_eval() {
     local task="$1"
-    local infer_args="--config eval_config/eval_infer.yaml --task ${task}"
-    local sim_args="--config eval_config/eval_sim.yaml --task ${task}"
+    local infer_args="--config ${INFER_CONFIG} --task ${task}"
+    local sim_args="--config ${SIM_CONFIG} --task ${task}"
     local infer_name="eval_infer_${task}"
     local sim_name="eval_sim_${task}"
 
@@ -61,10 +135,7 @@ run_eval() {
 
     # 等待 infer WebSocket 就绪
     info "等待 infer 就绪..."
-    for i in $(seq 1 60); do
-        curl -s --max-time 1 http://localhost:8765/ >/dev/null 2>&1 && break
-        sleep 2
-    done
+    wait_for_infer_ready "${task}" "${infer_name}" "${INFER_CONTROL_PORT}" "${INFER_STREAM_PORT}" "${INFER_READY_TIMEOUT}"
 
     # 启动 sim-eval 容器（GPU，前台）
     info "启动 sim-eval 容器..."
