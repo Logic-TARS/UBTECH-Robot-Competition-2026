@@ -1,16 +1,30 @@
 # infer 容器配置 — task 通过 --task CLI 参数覆盖
 task: task4
-device: cpu
 
-adapter_type: lerobot
-adapter_class:
-adapter_config: {}
+# ---- 设备 ----
+device: cpu                          # cpu / cuda / cuda:0
 
-policy_type: act
+# ---- 策略适配器 ----
+adapter_type: lerobot                # 内置适配器类型：lerobot
+# adapter_class:                     # 自定义适配器类路径，设置后优先于 adapter_type
+                                     #   格式: my_pkg.my_module:MyAdapterClass
+adapter_config: {}                   # 自定义适配器额外参数，传入 load() 的 config
 
-websocket_server_host: 0.0.0.0
-websocket_control_port: 8765
-websocket_stream_port: 8766
-heartbeat_interval: 5.0
-connection_timeout: 30.0
-websocket_max_size_bytes: null
+# ---- LeRobot 策略（adapter_class 为空时生效）----
+policy_type: act                     # 策略类型：act / pi0 / diffusion
+# policy_path:                       # 模型权重路径，取消注释并填写路径即可覆盖默认值
+                                     #   默认: challenge2026_baseline/<task>/act/pretrained_model
+
+# ---- 任务配置 ----
+# task_config_path:                  # 任务 YAML 配置文件路径，取消注释并填写路径即可覆盖默认值
+                                     #   默认: Ubtech_sim/config/<TaskName>.yaml
+# task_text:                         # 任务自然语言描述，取消注释并填写即可覆盖默认值
+# max_steps:                         # 单个 episode 最大步数，取消注释并填写即可覆盖默认值
+
+# ---- WebSocket 服务 ----
+websocket_server_host: 0.0.0.0       # infer 服务监听地址
+websocket_control_port: 8765         # 控制通道端口
+websocket_stream_port: 8766          # 数据流通道端口
+heartbeat_interval: 5.0              # 心跳间隔（秒）
+connection_timeout: 30.0             # 连接超时（秒）
+websocket_max_size_bytes: null       # 单条消息最大字节数，null 为不限制

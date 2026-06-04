@@ -113,8 +113,8 @@ def task1_check_parts_in_lift(
 def task1_time_out_check(
     elapsed_seconds: float,
     full_score: int = 20,
-    full_time_seconds: float = 40.0,
-    penalty_interval_seconds: float = 10.0,
+    full_time_seconds: float = 180.0,
+    penalty_interval_seconds: float = 30.0,
     penalty_per_interval: int = 5,
 ) -> int:
     """
@@ -521,8 +521,8 @@ def task4_check_long_edge_close_score(
 def task4_time_score(
     elapsed_seconds: float,
     full_score: int = 40,
-    full_time_seconds: float = 120.0,
-    penalty_interval_seconds: float = 10.0,
+    full_time_seconds: float = 180.0,
+    penalty_interval_seconds: float = 30.0,
     penalty_per_interval: int = 5,
 ) -> int:
     """
