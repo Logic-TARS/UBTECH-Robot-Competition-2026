@@ -416,6 +416,8 @@ class SimEvalContainer:
             return int(metrics.get("task1_total_score", 0))
         if self.task == "task2":
             return int(metrics.get("task2_total_score", 0))
+        if self.task == "task3":
+            return int(metrics.get("task3_total_score", 0))
         if self.task == "task4":
             return int(metrics.get("task4_total_score", 0))
         return int(metrics.get("total_score", 0))

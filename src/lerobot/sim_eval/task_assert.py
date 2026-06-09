@@ -10,19 +10,21 @@ from .common import WalkerS2sim
 from .terminal import check_step_terminal, task1_check_parts_out_of_workspace, task2_check_all_parts_lost, task3_check_terminal, task4_check_box_poses_terminal
 from .scoring import (
     task1_check_parts_in_box,
-    task1_check_parts_in_lift,
     task1_time_out_check,
     task2_check_parts_grabbed,
     task2_check_parts_in_correct_bin,
     task2_calculate_total_score,
+    task2_check_end_effector_followed_parts,
     task3_calculate_specific_score,
+    task3_check_parts_inserted_in_slots,
     task3_time_score,
     task4_check_box_joints_success,
     task4_check_short_edge_close_score,
     task4_check_long_edge_close_score,
     task4_time_score,
-    task4_get_bimanual_collaboration_factor,
     task4_calculate_total_score,
+    calculate_time_score,
+    check_parts_lifted_from_initial_height,
 )
 import logging
 
@@ -122,46 +124,85 @@ class Task4EpisodeActionTracker:
         }
         
         
-class Taks1EpisodePartsTracker:
-    """记录 episode 内每一步零件的位姿，并统计是否有零件掉落（task1 以外的其他任务可复用该类进行零件跟踪）。"""
+class EpisodePartsTracker:
+    """记录 episode 内每一步零件的位姿，跟踪初始高度、静态和释放状态。"""
 
     def __init__(self):
-        self.parts_poses_list: list[dict[str, Any]] = []
-        # 记录每个零件的 XYZ 坐标轨迹，格式：{prim_path: [[x1,y1,z1], [x2,y2,z2], ...]}
+        self.parts_poses_list: list[list[dict[str, Any]]] = []
         self.parts_trajectory: dict[str, list[list[float]]] = {}
+        self.initial_heights: dict[str, float] = {}
+        self.last_positions: dict[str, list[float]] = {}
+        self.static_parts: set[str] = set()
+        self.released_parts: set[str] = set()
 
     def reset(self) -> None:
         self.parts_poses_list.clear()
         self.parts_trajectory.clear()
+        self.initial_heights.clear()
+        self.last_positions.clear()
+        self.static_parts.clear()
+        self.released_parts.clear()
 
-    def add_parts_poses(self, parts_poses_dict: dict[str, Any]) -> None:
-        """添加一步的零件位姿数据，并更新轨迹"""
+    def add_parts_poses(self, parts_poses_dict: list[dict[str, Any]], static_window: int = 10, static_threshold: float = 0.005) -> None:
+        """记录一步零件位姿，更新轨迹、初始高度和静止判定。
+
+        静止判定：最近 static_window 帧内所有位姿的最大位移 <= static_threshold 时标记为静止。
+        """
         self.parts_poses_list.append(parts_poses_dict)
-
-        # 更新每个零件的轨迹
         for part_info in parts_poses_dict:
-            prim_path = part_info['prim_path']
-            position = part_info['position']  # [x, y, z]
-            if prim_path not in self.parts_trajectory:
-                self.parts_trajectory[prim_path] = []
-            self.parts_trajectory[prim_path].append(position)
+            prim_path = str(part_info["prim_path"])
+            position = [float(v) for v in part_info["position"][:3]]
+            if prim_path not in self.initial_heights:
+                self.initial_heights[prim_path] = float(position[2])
+            self.parts_trajectory.setdefault(prim_path, []).append(position)
+            self.last_positions[prim_path] = position
+
+            recent = self.parts_trajectory[prim_path][-int(static_window):]
+            if len(recent) >= int(static_window):
+                arr = np.asarray(recent, dtype=np.float32)
+                max_delta = float(np.max(np.linalg.norm(arr - arr[-1], axis=1)))
+                if max_delta <= float(static_threshold):
+                    self.static_parts.add(prim_path)
+
+    def update_release_state(
+        self,
+        parts_poses_dict: list[dict[str, Any]],
+        ee_poses: dict[str, Any],
+        release_distance_threshold: float = 0.08,
+    ) -> list[dict[str, Any]]:
+        """更新零件的释放和静止状态，返回注入 released/static 字段的零件列表。
+
+        释放判定：零件到所有端执行器的最近距离 > release_distance_threshold。
+        一旦判定为释放则永久记录（released_parts 集合只增不减）。
+        """
+        ee_points = []
+        for value in ee_poses.values():
+            vec = np.asarray(value, dtype=np.float32).reshape(-1)
+            if vec.size >= 3:
+                ee_points.append(vec[:3])
+
+        enriched = []
+        for part in parts_poses_dict:
+            new_part = dict(part)
+            part_id = str(part.get("prim_path", ""))
+            pos = np.asarray(part.get("position", []), dtype=np.float32).reshape(-1)
+            released = False
+            if pos.size >= 3 and ee_points:
+                min_distance = min(float(np.linalg.norm(pos[:3] - ee)) for ee in ee_points)
+                released = min_distance > float(release_distance_threshold)
+            if released:
+                self.released_parts.add(part_id)
+            new_part["released"] = part_id in self.released_parts
+            new_part["static"] = part_id in self.static_parts
+            enriched.append(new_part)
+        return enriched
 
     def check_parts_moved(self, movement_threshold: float = 0.001) -> dict[str, bool]:
-        """检查每个零件是否有运动
-
-        Args:
-            movement_threshold: 最小运动阈值（米），默认 1mm
-
-        Returns:
-            dict: {prim_path: True/False}，True 表示有运动
-        """
         moved_result = {}
         for prim_path, trajectory in self.parts_trajectory.items():
             if len(trajectory) < 2:
                 moved_result[prim_path] = False
                 continue
-
-            # 计算起点到终点的位移
             start_pos = trajectory[0]
             end_pos = trajectory[-1]
             displacement = np.sqrt(
@@ -170,17 +211,27 @@ class Taks1EpisodePartsTracker:
                 (end_pos[2] - start_pos[2])**2
             )
             moved_result[prim_path] = displacement > movement_threshold
-
         return moved_result
 
     def get_all_parts_moved(self, movement_threshold: float = 0.001) -> bool:
-        """检查是否所有零件都有运动
-
-        Returns:
-            bool: True 表示所有零件都有运动
-        """
         moved_result = self.check_parts_moved(movement_threshold)
         return all(moved_result.values()) if moved_result else False
+
+
+def get_robot_ee_poses(robot: WalkerS2sim) -> dict[str, Any]:
+    """安全获取机器人端执行器位姿。
+
+    通过 robot._robot_interface.get_ee_poses() 获取各臂末端位姿字典。
+    接口不可用时返回空字典。
+
+    Returns:
+        dict[str, Any]: 端执行器位姿字典，如 {"left": np.ndarray, "right": np.ndarray}。
+    """
+    interface = getattr(robot, "_robot_interface", None)
+    if interface is None or not hasattr(interface, "get_ee_poses"):
+        return {}
+    poses = interface.get_ee_poses()
+    return poses if isinstance(poses, dict) else {}
 
 class NoOpAssertion(TaskAssertion):
     """不做任何判断，仅靠超时终止 episode。适用于 task3 暂无判据的情况。"""
@@ -196,9 +247,15 @@ class NoOpAssertion(TaskAssertion):
         return False, terminal, reason, {}
 
 class Task1Assertion(TaskAssertion):
-    """
-    Task1（抓取-放置）成功判据：
-    检查零件是否已进入目标箱体区域。
+    """Task1（抓取-放置）断言（官方标准）。
+
+    评分规则：
+    - 抓取: 每零件 10 分，相对初始高度抬升 >= lift_delta(0.10m) 计分，满分 40。
+    - 放置: 每零件 10 分，零件在正确料箱内、已释放且静止后计分，满分 40。
+    - 时间: 满分 20，180 秒内完成，每超 30 秒扣 5 分。
+    - 成功门槛: 80 分（抓取+放置），达标后才计算时间分。
+
+    终止条件: 零件出界 / 超时。
     """
     def __init__(
         self,
@@ -214,6 +271,7 @@ class Task1Assertion(TaskAssertion):
         time_penalty_per_interval: int,
         success_score_threshold: int,
         parts_movement_threshold: float,
+        lift_delta: float,
     ):
         self._lift_height = float(lift_height)
         self._workspace_limits = workspace_limits
@@ -232,18 +290,20 @@ class Task1Assertion(TaskAssertion):
         self._time_penalty_interval_seconds = float(time_penalty_interval_seconds)
         self._time_penalty_per_interval = int(time_penalty_per_interval)
         self._success_score_threshold = int(success_score_threshold)
-        self._parts_movement_threshold = float(parts_movement_threshold) 
+        self._parts_movement_threshold = float(parts_movement_threshold)
+        self._lift_delta = float(lift_delta)
         self._lift_scored_parts: set[str] = set()
         self._box_scored_parts: set[str] = set()
         self._episode_start_time: float = time.time()
         self._last_step: int = 0
-        self._parts_tracker = Taks1EpisodePartsTracker()  # 
+        self._parts_tracker = EpisodePartsTracker()
 
     def _reset_episode_state(self) -> None:
+        """重置 episode 内所有累积计分状态、计时和零件跟踪器。"""
         self._lift_scored_parts.clear()
         self._box_scored_parts.clear()
         self._episode_start_time = time.time()
-        self._parts_tracker.reset()  # 新增
+        self._parts_tracker.reset()
 
     def __call__(
         self,
@@ -251,20 +311,19 @@ class Task1Assertion(TaskAssertion):
         step: int,
         action: np.ndarray | torch.Tensor | None = None,
         extra_info: any = None
-        
+
     ) -> tuple[bool, bool, str, dict]:
         metrics: dict = {}
         try:
-            # episode 从 step=1 开始，重置累计计分状态。
             if step <= 1 or step < self._last_step:
                 self._reset_episode_state()
             self._last_step = step
 
             parts_poses = robot._scene_builder.get_parts_world_poses()
 
-            # 记录零件轨迹（新增）
+            ee_poses = get_robot_ee_poses(robot)
             self._parts_tracker.add_parts_poses(parts_poses)
-
+            parts_poses = self._parts_tracker.update_release_state(parts_poses, ee_poses)
 
             terminal_out_of_workspace = task1_check_parts_out_of_workspace(
                 parts_poses,
@@ -275,13 +334,12 @@ class Task1Assertion(TaskAssertion):
             parts_moved = False
             terminal = terminal_out_of_workspace or terminal_time_out or terminal_no_movement
 
-            # 初始化分数为 0
             box_score = 0
             lift_score = 0
             time_score = 0
             elapsed_seconds = 0.0
 
-            elapsed_seconds = max(0.0, time.time() - self._episode_start_time)  
+            elapsed_seconds = max(0.0, time.time() - self._episode_start_time)
             box_pos, box_ori = robot._scene_builder.boxes.get_world_poses()
             box_score, self._box_scored_parts = task1_check_parts_in_box(
                 box_poses=(np.asarray(box_pos).squeeze(), np.asarray(box_ori).squeeze()),
@@ -290,19 +348,20 @@ class Task1Assertion(TaskAssertion):
                 box_half_size=self._box_half_size,
                 score_per_part=self._box_score_per_part,
                 max_parts=self._max_parts,
+                require_released=True,
+                require_static=True,
             )
-            lift_score, self._lift_scored_parts = task1_check_parts_in_lift(
+            lift_score, self._lift_scored_parts = check_parts_lifted_from_initial_height(
                 parts_poses_dict=parts_poses,
-                threshold_height=self._lift_height,
+                initial_heights=self._parts_tracker.initial_heights,
                 scored_parts=self._lift_scored_parts,
+                lift_delta=self._lift_delta,
                 score_per_part=self._lift_score_per_part,
                 max_parts=self._max_parts,
             )
 
-            # 基础分数（抬升 + 入箱）
             total_score = int(box_score + lift_score)
 
-            # success 时额外计算时间分数
             is_success = total_score >= self._success_score_threshold
             if is_success:
                 time_score = task1_time_out_check(
@@ -314,13 +373,8 @@ class Task1Assertion(TaskAssertion):
                 )
                 total_score = int(total_score + time_score)
 
-                # 检查零件是否有运动
                 parts_moved = self._parts_tracker.get_all_parts_moved(self._parts_movement_threshold)
                 terminal_no_movement = not parts_moved
-
-            # 如果零件没有运动，分数清零
-            if terminal_no_movement:
-                total_score = 0
 
             metrics = {
                 "task1_lift_score": int(lift_score),
@@ -359,22 +413,29 @@ class Task1Assertion(TaskAssertion):
             return False, False, f"断言异常: {e}", metrics
 
 class Task2Assertion(TaskAssertion):
-    """
-    Task2（传送带分拣）成功判据：
-    - 基础分 = 抓取分(grab) + 分拣分(sort)，满分 200
-    - 成功：基础分 ≥ 门槛（默认 150，即 75%，参考 Task1）
-    - 最终得分 = 分拣分（官方标准，max 100）
-    - 终止：超时 / 所有零件掉落传送带以下
+    """Task2（传送带分拣）断言（官方标准）。
+
+    评分规则：
+    - 跟随: 每零件 2.5 分，任一端执行器到达 10 cm 内计分，满分 20。
+    - 抓取: 每零件 5 分，相对初始高度抬升 >= lift_delta(0.10m) 计分，满分 40。
+    - 分拣: 每零件 5 分，零件在正确料箱内、已释放且静止后计分，满分 40。
+    - 总计: 跟随 + 抓取 + 分拣，满分 100。
+    - 成功门槛: 100 分。
+
+    终止条件: 超时 / 所有零件掉落传送带以下。
     """
     def __init__(
         self,
         conveyor_limits: dict[str, tuple[float, float]],
         conveyor_drop_z: float,
         bin_half_size: tuple[float, float, float],
-        grab_score_per_part: int,
-        sort_score_per_part: int,
+        grab_score_per_part: float,
+        sort_score_per_part: float,
         max_parts: int,
         success_score_threshold: int,
+        follow_score_per_part: float,
+        follow_distance_threshold: float,
+        lift_delta: float,
     ):
         self._conveyor_limits = conveyor_limits
         self._conveyor_drop_z = float(conveyor_drop_z)
@@ -385,17 +446,24 @@ class Task2Assertion(TaskAssertion):
             float(bin_half_size[1]),
             float(bin_half_size[2]),
         )
-        self._grab_score_per_part = int(grab_score_per_part)
-        self._sort_score_per_part = int(sort_score_per_part)
+        self._grab_score_per_part = float(grab_score_per_part)
+        self._sort_score_per_part = float(sort_score_per_part)
         self._max_parts = int(max_parts)
         self._success_score_threshold = int(success_score_threshold)
+        self._follow_score_per_part = float(follow_score_per_part)
+        self._follow_distance_threshold = float(follow_distance_threshold)
+        self._lift_delta = float(lift_delta)
         self._grab_scored_parts: set[str] = set()
         self._sort_scored_parts: set[str] = set()
+        self._follow_scored_parts: set[str] = set()
         self._last_step: int = 0
+        self._parts_tracker = EpisodePartsTracker()
 
     def _reset_episode_state(self) -> None:
         self._grab_scored_parts.clear()
         self._sort_scored_parts.clear()
+        self._follow_scored_parts.clear()
+        self._parts_tracker.reset()
 
     def __call__(
         self,
@@ -406,15 +474,16 @@ class Task2Assertion(TaskAssertion):
     ) -> tuple[bool, bool, str, dict]:
         metrics: dict = {}
         try:
-            # 新 episode 从 step=1 开始，重置累计计分状态。
             if step <= 1 or step < self._last_step:
                 self._reset_episode_state()
             self._last_step = step
 
-            # 获取传送带上的工件位姿
             parts_poses = robot._scene_builder.get_parts_world_poses()
 
-            # 左右料箱：SceneBuilder 中 box_position 与 XFormPrim 一一对应；Task2 场景沿世界 x 排布，
+            ee_poses = get_robot_ee_poses(robot)
+            self._parts_tracker.add_parts_poses(parts_poses)
+            parts_poses = self._parts_tracker.update_release_state(parts_poses, ee_poses)
+
             bin_positions, bin_orientations = robot._scene_builder.boxes.get_world_poses()
             bin_positions = np.asarray(bin_positions)
             bin_orientations = np.asarray(bin_orientations)
@@ -426,16 +495,25 @@ class Task2Assertion(TaskAssertion):
             left_bin = (bin_positions[li], bin_orientations[li])
             right_bin = (bin_positions[ri], bin_orientations[ri])
 
-            # 检查抓取得分
+            follow_score, self._follow_scored_parts, follow_details = task2_check_end_effector_followed_parts(
+                parts_poses_dict=parts_poses,
+                ee_poses=ee_poses,
+                scored_parts=self._follow_scored_parts,
+                distance_threshold=self._follow_distance_threshold,
+                score_per_part=self._follow_score_per_part,
+                max_parts=self._max_parts,
+            )
+
             grab_score, self._grab_scored_parts, grab_details = task2_check_parts_grabbed(
                 parts_poses_dict=parts_poses,
                 conveyor_limits=self._conveyor_limits,
                 scored_parts=self._grab_scored_parts,
                 score_per_part=self._grab_score_per_part,
                 max_parts=self._max_parts,
+                initial_heights=self._parts_tracker.initial_heights,
+                lift_delta=self._lift_delta,
             )
 
-            # 检查分拣得分
             sort_score, self._sort_scored_parts, sort_details = task2_check_parts_in_correct_bin(
                 parts_poses_dict=parts_poses,
                 left_bin_pose=left_bin,
@@ -444,16 +522,15 @@ class Task2Assertion(TaskAssertion):
                 scored_parts=self._sort_scored_parts,
                 score_per_part=self._sort_score_per_part,
                 max_parts=self._max_parts,
+                require_released=True,
+                require_static=True,
             )
 
-            # 基础分 = 抓取分 + 分拣分（满分 200），参考 Task1 两段式设计
-            base_score = int(grab_score + sort_score)
-            # 最终得分 = 分拣分（官方标准，max 100），抓取分仅用于成功判定
-            total_score = int(sort_score)
+            total_score = float(follow_score + grab_score + sort_score)
+            base_score = total_score
 
             is_success = base_score >= self._success_score_threshold
 
-            # 终止条件：超时 / 所有零件掉落传送带以下
             max_steps = extra_info.get("max_steps", 1000) if extra_info else 1000
             terminal_time = check_step_terminal(step, int(max_steps))
             terminal_lost = task2_check_all_parts_lost(
@@ -463,16 +540,19 @@ class Task2Assertion(TaskAssertion):
             terminal = terminal_time or terminal_lost
 
             metrics = {
+                "task2_follow_score": float(follow_score),
                 "task2_grab_score": int(grab_score),
                 "task2_sort_score": int(sort_score),
-                "task2_base_score": int(base_score),
-                "task2_total_score": int(total_score),
+                "task2_base_score": float(base_score),
+                "task2_total_score": float(total_score),
+                "task2_follow_scored_count": int(len(self._follow_scored_parts)),
                 "task2_grab_scored_count": int(len(self._grab_scored_parts)),
                 "task2_sort_scored_count": int(len(self._sort_scored_parts)),
-                "task2_max_parts": int(self._max_parts),
-                "task2_success_score_threshold": int(self._success_score_threshold),
+                "task2_follow_details": follow_details,
                 "task2_grab_details": grab_details,
                 "task2_sort_details": sort_details,
+                "task2_max_parts": int(self._max_parts),
+                "task2_success_score_threshold": int(self._success_score_threshold),
                 "task2_terminal_time": bool(terminal_time),
                 "task2_terminal_lost": bool(terminal_lost),
                 "is_success": bool(is_success),
@@ -480,7 +560,7 @@ class Task2Assertion(TaskAssertion):
             }
 
             if is_success:
-                reason = f"Success！！！，基础分{base_score}达到门槛{self._success_score_threshold}（分拣分{total_score}）"
+                reason = f"Success！！！，基础分{base_score}达到门槛{self._success_score_threshold}"
             elif terminal_lost:
                 reason = "Terminal！！！，所有零件掉落传送带以下"
             elif terminal_time:
@@ -495,91 +575,172 @@ class Task2Assertion(TaskAssertion):
 
 
 class Task3Assertion(TaskAssertion):
+    """Task3（嵌装）断言（官方标准）。
+
+    评分规则：
+    - 抓取: 每零件 7.5 分，相对初始高度抬升 >= lift_delta(0.10m) 计分，满分 45。
+    - 嵌装: 每零件 7.5 分，匹配槽位内释放静止后计分，每槽位限用一次，满分 45。
+    - 时间: 满分 10，360 秒内完成，每超 60 秒扣 5 分。
+    - 成功门槛: 90 分（抓取+嵌装），达标后才计算时间分。
+
+    终止条件: 超时 / 零件出界 / 成功。
+    前 60 步为环境初始化宽限期，不做出界判死。
+    """
+
     def __init__(
         self,
         foam_pos: list[float],
         workspace_limits: dict,
         dist_threshold: float,
         height_threshold: float,
-        success_score_threshold: int
+        success_score_threshold: int,
+        grab_score_per_part: float,
+        insert_score_per_part: float,
+        max_parts: int,
+        lift_delta: float,
+        time_full_score: int,
+        time_full_time_seconds: float,
+        time_penalty_interval_seconds: float,
+        time_penalty_per_interval: int,
     ):
         self.workspace_limits = workspace_limits
         self.dist_threshold = dist_threshold
         self.height_threshold = height_threshold
         self.success_score_threshold = success_score_threshold
-        
+        self.grab_score_per_part = float(grab_score_per_part)
+        self.insert_score_per_part = float(insert_score_per_part)
+        self.max_parts = int(max_parts)
+        self.lift_delta = float(lift_delta)
+        self.time_full_score = int(time_full_score)
+        self.time_full_time_seconds = float(time_full_time_seconds)
+        self.time_penalty_interval_seconds = float(time_penalty_interval_seconds)
+        self.time_penalty_per_interval = int(time_penalty_per_interval)
+
         self.foam_center = np.array(foam_pos)
         self._episode_start_time = time.time()
         self.max_insertion_score = 0
         self._last_step = 0
+        self._grab_scored_parts: set[str] = set()
+        self._insert_scored_parts: set[str] = set()
+        self._used_slots: set[str] = set()
+        self._parts_tracker = EpisodePartsTracker()
+
+    def _build_slots(self) -> list[dict]:
+        """构建 Task3 嵌装槽位列表（A 类 Y=0.21，B 类 Y=0.41，各 3 个）。
+
+        Returns:
+            list[dict]: 槽位信息，每项含 slot_id、type、position。
+        """
+        return [
+            {"slot_id": "A0", "type": "A", "position": [0.54, 0.21, 1.04]},
+            {"slot_id": "A1", "type": "A", "position": [0.76, 0.21, 1.04]},
+            {"slot_id": "A2", "type": "A", "position": [0.98, 0.21, 1.04]},
+            {"slot_id": "B0", "type": "B", "position": [0.54, 0.41, 1.04]},
+            {"slot_id": "B1", "type": "B", "position": [0.76, 0.41, 1.04]},
+            {"slot_id": "B2", "type": "B", "position": [0.98, 0.41, 1.04]},
+        ]
 
     def _reset_episode_state(self) -> None:
-        """重置每个 Episode 的状态，防止时间与分数带入下一轮"""
+        """重置 episode 内所有累积状态（计分、槽位、零件跟踪器、计时）。"""
         self._episode_start_time = time.time()
         self.max_insertion_score = 0
+        self._grab_scored_parts.clear()
+        self._insert_scored_parts.clear()
+        self._used_slots.clear()
+        self._parts_tracker.reset()
 
     def __call__(self, robot, step, action=None, extra_info=None, **kwargs):
-        # 识别新 Episode 并重置状态
         if step <= 1 or step < self._last_step:
             self._reset_episode_state()
         self._last_step = step
 
-        # 计算当前已用时间（移到最前面，确保任何时候都有值）
         elapsed = time.time() - self._episode_start_time
 
-        # 60步（约2秒）内零件可能抖动，不做死亡判定
         is_grace_period = (step < 60)
         parts_poses = robot._scene_builder.get_parts_world_poses()
         terminal_time = check_step_terminal(step, extra_info.get("max_steps", 10000) if extra_info else 10000)
-        
-        # 💡 修正 1：使用 task3 专用的边界检查，防止瞬间死亡
+
+        ee_poses = get_robot_ee_poses(robot)
+        self._parts_tracker.add_parts_poses(parts_poses)
+        parts_poses = self._parts_tracker.update_release_state(parts_poses, ee_poses)
+
         terminal_out = False
         reason_out = ""
         if not is_grace_period:
             terminal_out, reason_out = task3_check_terminal(
                 robot, parts_poses, self.foam_center, self.workspace_limits
             )
-        
-        # 💡 修正 2：使用初始化的阈值，不使用硬编码
-        insertion_score, scored_parts = task3_calculate_specific_score(
+
+        grab_score, self._grab_scored_parts = check_parts_lifted_from_initial_height(
             parts_poses_dict=parts_poses,
-            dist_threshold=self.dist_threshold, 
-            height_threshold=self.height_threshold
+            initial_heights=self._parts_tracker.initial_heights,
+            scored_parts=self._grab_scored_parts,
+            lift_delta=self.lift_delta,
+            score_per_part=self.grab_score_per_part,
+            max_parts=self.max_parts,
         )
-        
-        # 记录本次 Episode 达到的最高分
-        self.max_insertion_score = max(self.max_insertion_score, insertion_score)
-        is_success = self.max_insertion_score >= self.success_score_threshold
-        
-        # 计算时间奖励分（仅在成功后计算）
-        total_score = self.max_insertion_score
+
+        insert_score, self._insert_scored_parts, self._used_slots = task3_check_parts_inserted_in_slots(
+            parts_poses_dict=parts_poses,
+            slots=self._build_slots(),
+            scored_parts=self._insert_scored_parts,
+            used_slots=self._used_slots,
+            dist_threshold=self.dist_threshold,
+            height_threshold=self.height_threshold,
+            score_per_part=self.insert_score_per_part,
+            max_parts=self.max_parts,
+            require_released=True,
+            require_static=True,
+        )
+
+        base_score = float(grab_score + insert_score)
+        is_success = base_score >= float(self.success_score_threshold)
+
+        time_score = 0
         if is_success:
-            total_score += task3_time_score(elapsed)
-        
-        # 判定是否终止
+            time_score = int(calculate_time_score(
+                elapsed_seconds=elapsed,
+                full_score=self.time_full_score,
+                full_time_seconds=self.time_full_time_seconds,
+                penalty_interval_seconds=self.time_penalty_interval_seconds,
+                penalty_per_interval=self.time_penalty_per_interval,
+            ))
+        total_score = float(base_score + time_score)
+
         terminal = terminal_time or terminal_out or is_success
-        
+
         reason = "进行中"
         if is_success: reason = "成功完成"
         elif terminal_time: reason = "超时"
         elif terminal_out: reason = reason_out or "出界(零件掉落)"
         elif is_grace_period: reason = "环境初始化中"
 
-        # 💡 关键修正：返回 sim_eval.py 要求的 4 个参数
         metrics = {
-            "insertion_score": insertion_score,
-            "max_insertion_score": self.max_insertion_score,
-            "total_score": total_score,
-            "elapsed_time": elapsed
+            "task3_grab_score": float(grab_score),
+            "task3_insert_score": float(insert_score),
+            "task3_time_score": int(time_score),
+            "task3_total_score": float(total_score),
+            "task3_grab_scored_count": int(len(self._grab_scored_parts)),
+            "task3_insert_scored_count": int(len(self._insert_scored_parts)),
+            "task3_used_slot_count": int(len(self._used_slots)),
+            "elapsed_time": float(elapsed),
+            "total_score": float(total_score),
         }
 
         return is_success, terminal, reason, metrics
 
 class Task4Assertion(TaskAssertion):
-    """
-    Task4（装箱）成功判据：
-    - 成功：盒子关节位置达到目标角度
-    - 终止：盒子位姿偏离初始位姿 或 超时
+    """Task4（装箱）断言（官方标准）。
+
+    评分规则：
+    - 短边: 每边 15 分，需端执行器接触对应边缘位置后闭合，满分 30。
+    - 长边: 每边 15 分，需端执行器接触对应边缘位置后闭合，满分 30。
+    - 时间: 满分 10，180 秒内完成，每超 30 秒扣 5 分。
+    - 无协作系数（官方标准中不存在）。
+    - 总分上限 100。
+
+    成功条件: 连续 success_hold_steps 步盒子关节达到目标角度。
+    终止条件: 盒子位姿偏离初始位姿 / 超时 / 成功。
     """
 
     def __init__(
@@ -598,10 +759,9 @@ class Task4Assertion(TaskAssertion):
         time_full_time_seconds: float,
         time_penalty_interval_seconds: float,
         time_penalty_per_interval: int,
-        single_arm_factor: float,
-        bimanual_factor: float,
         box_pose_position_threshold: float,
         box_pose_orientation_threshold: float,
+        contact_distance_threshold: float,
     ):
         self._short_edge_targets = np.asarray(short_edge_targets, dtype=np.float32).reshape(2)
         self._long_edge_targets = np.asarray(long_edge_targets, dtype=np.float32).reshape(2)
@@ -617,14 +777,15 @@ class Task4Assertion(TaskAssertion):
         self._time_full_time_seconds = time_full_time_seconds
         self._time_penalty_interval_seconds = time_penalty_interval_seconds
         self._time_penalty_per_interval = time_penalty_per_interval
-        self._single_arm_factor = single_arm_factor
-        self._bimanual_factor = bimanual_factor
         self._box_pose_position_threshold = box_pose_position_threshold
         self._box_pose_orientation_threshold = box_pose_orientation_threshold
+        self._contact_distance_threshold = float(contact_distance_threshold)
         self._consecutive_success = 0
         self._episode_start_time = time.time()
         self._last_step: int = 0
         self._action_tracker = Task4EpisodeActionTracker()
+        self._contacted_short_edges: set[int] = set()
+        self._contacted_long_edges: set[int] = set()
 
     @property
     def target_box_joints(self) -> np.ndarray:
@@ -641,6 +802,42 @@ class Task4Assertion(TaskAssertion):
         self._episode_start_time = time.time()
         self._consecutive_success = 0
         self._action_tracker.reset()
+        self._contacted_short_edges.clear()
+        self._contacted_long_edges.clear()
+
+    def _update_edge_contacts(self, robot: WalkerS2sim) -> None:
+        """基于端执行器与盒子边缘的接近距离更新接触状态。
+
+        接触判定：任一端执行器到边缘参考点的距离 <= contact_distance_threshold。
+        一旦接触则永久记录（_contacted_short_edges/_contacted_long_edges 只增不减）。
+        若 Isaac Sim 原生接触传感器可用，可替换本方法内部实现。
+        """
+        ee_poses = get_robot_ee_poses(robot)
+        ee_points = []
+        for value in ee_poses.values():
+            vec = np.asarray(value, dtype=np.float32).reshape(-1)
+            if vec.size >= 3:
+                ee_points.append(vec[:3])
+        if not ee_points:
+            return
+
+        box_pos, _ = robot._scene_builder.box_articulation.get_world_poses()
+        center = np.asarray(box_pos, dtype=np.float32).reshape(-1)[:3]
+        short_edge_points = [
+            center + np.array([0.0, -0.20, 0.12], dtype=np.float32),
+            center + np.array([0.0, 0.20, 0.12], dtype=np.float32),
+        ]
+        long_edge_points = [
+            center + np.array([-0.30, 0.0, 0.12], dtype=np.float32),
+            center + np.array([0.30, 0.0, 0.12], dtype=np.float32),
+        ]
+
+        for idx, edge_point in enumerate(short_edge_points):
+            if min(float(np.linalg.norm(edge_point - ee)) for ee in ee_points) <= self._contact_distance_threshold:
+                self._contacted_short_edges.add(idx)
+        for idx, edge_point in enumerate(long_edge_points):
+            if min(float(np.linalg.norm(edge_point - ee)) for ee in ee_points) <= self._contact_distance_threshold:
+                self._contacted_long_edges.add(idx)
 
     def __call__(
         self,
@@ -690,17 +887,16 @@ class Task4Assertion(TaskAssertion):
         if is_success:
             terminal = True
 
-        # 计算短边分数
-        short_edge_score, short_info = task4_check_short_edge_close_score(
+        self._update_edge_contacts(robot)
+
+        short_edge_raw_score, short_info = task4_check_short_edge_close_score(
             current_box_joints=cur_joints,
             short_edge_targets=self._short_edge_targets,
             joint_indices=self._short_edge_joint_indices,
             threshold=self._joint_threshold,
             score_per_edge=self._short_edge_score_per_edge,
         )
-
-        # 计算长边分数
-        long_edge_score, long_info = task4_check_long_edge_close_score(
+        long_edge_raw_score, long_info = task4_check_long_edge_close_score(
             current_box_joints=cur_joints,
             long_edge_targets=self._long_edge_targets,
             joint_indices=self._long_edge_joint_indices,
@@ -708,7 +904,17 @@ class Task4Assertion(TaskAssertion):
             score_per_edge=self._long_edge_score_per_edge,
         )
 
-        # 计算时间分数
+        short_edge_score = sum(
+            self._short_edge_score_per_edge
+            for idx, closed in enumerate(short_info.get("short_edge_closed", []))
+            if closed and idx in self._contacted_short_edges
+        )
+        long_edge_score = sum(
+            self._long_edge_score_per_edge
+            for idx, closed in enumerate(long_info.get("long_edge_closed", []))
+            if closed and idx in self._contacted_long_edges
+        )
+
         elapsed_seconds = max(0.0, time.time() - self._episode_start_time)
         time_score = task4_time_score(
             elapsed_seconds=elapsed_seconds,
@@ -718,42 +924,17 @@ class Task4Assertion(TaskAssertion):
             penalty_per_interval=self._time_penalty_per_interval,
         )
 
-        # 计算双臂协作分数
-        collaboration_stats = self._action_tracker.get_bimanual_collaboration_stats(
-            movement_eps=self._action_movement_eps,
-            co_move_ratio_threshold=self._co_move_ratio_threshold,
-        )
-
-        # 根据是否存在双臂协作调整总分
-        collaboration_factor = task4_get_bimanual_collaboration_factor(
-            is_bimanual_collaboration=bool(collaboration_stats.get("is_bimanual_collaboration", False)),
-            single_arm_factor=self._single_arm_factor,
-            bimanual_factor=self._bimanual_factor,
-        )
-
-        # 计算总分：时间分数仅在 is_success 为 true 时才计算，否则时间分数为 0
-        # 短边分数和长边分数始终计算
-        if is_success:
-            score_info = task4_calculate_total_score(
-                short_edge_score=short_edge_score,
-                long_edge_score=long_edge_score,
-                time_score=time_score,
-                collaboration_factor=collaboration_factor,
-            )
-            total_score = int(score_info.get("final_score", 0))
-            task4_time_score_val = int(time_score)
-        else:
+        if not is_success:
             time_score = 0
-            score_info = task4_calculate_total_score(
-                short_edge_score=short_edge_score,
-                long_edge_score=long_edge_score,
-                time_score=time_score,
-                collaboration_factor=collaboration_factor,
-            )
-            total_score = int(score_info.get("final_score", 0))
-            task4_time_score_val = int(time_score)
 
-        # 构造详细的评估指标，便于后续分析
+        score_info = task4_calculate_total_score(
+            short_edge_score=short_edge_score,
+            long_edge_score=long_edge_score,
+            time_score=time_score,
+        )
+        total_score = int(score_info.get("final_score", 0))
+        task4_time_score_val = int(time_score)
+
         metrics = {
             "current_box_joints": cur_joints.tolist() if hasattr(cur_joints, "tolist") else cur_joints,
             "target_box_joints": self.target_box_joints.tolist(),
@@ -765,19 +946,13 @@ class Task4Assertion(TaskAssertion):
             "task4_time_score": task4_time_score_val,
             "task4_raw_score": int(score_info.get("raw_score", 0)),
             "task4_total_score": int(total_score),
-            "task4_collaboration_factor": float(score_info.get("collaboration_factor", self._single_arm_factor)) if is_success else float(self._single_arm_factor),
             "task4_short_edge_closed": short_info.get("short_edge_closed", [False, False]),
             "task4_short_edge_errors": short_info.get("short_edge_errors", [float("inf"), float("inf")]),
             "task4_long_edge_closed": long_info.get("long_edge_closed", [False, False]),
             "task4_long_edge_errors": long_info.get("long_edge_errors", [float("inf"), float("inf")]),
             "task4_elapsed_seconds": float(elapsed_seconds),
-            "task4_is_bimanual_collaboration": bool(collaboration_stats.get("is_bimanual_collaboration", False)),
-            "task4_co_move_steps": int(collaboration_stats.get("co_move_steps", 0)),
-            "task4_active_steps": int(collaboration_stats.get("active_steps", 0)),
-            "task4_co_move_ratio": float(collaboration_stats.get("co_move_ratio", 0.0)),
-            "task4_left_only_steps": int(collaboration_stats.get("left_only_steps", 0)),
-            "task4_right_only_steps": int(collaboration_stats.get("right_only_steps", 0)),
-            "task4_action_steps": int(collaboration_stats.get("valid_action_steps", 0)),
+            "task4_contacted_short_edges": int(len(self._contacted_short_edges)),
+            "task4_contacted_long_edges": int(len(self._contacted_long_edges)),
             "is_success": is_success,
             "terminal_pose": terminal_pose,
             "terminal_time": terminal_time,
@@ -828,6 +1003,7 @@ def create_task_assertion(task: str, args) -> TaskAssertion:
             time_penalty_per_interval=int(getattr(args, "task1_time_penalty_per_interval")),
             success_score_threshold=int(getattr(args, "task1_success_score_threshold")),
             parts_movement_threshold=float(getattr(args, "task1_parts_movement_threshold")),
+            lift_delta=float(getattr(args, "task1_lift_delta")),
         )
 
     elif task == "task4":
@@ -846,10 +1022,9 @@ def create_task_assertion(task: str, args) -> TaskAssertion:
             time_full_time_seconds=float(getattr(args, "task4_time_full_time_seconds")),
             time_penalty_interval_seconds=float(getattr(args, "task4_time_penalty_interval_seconds")),
             time_penalty_per_interval=int(getattr(args, "task4_time_penalty_per_interval")),
-            single_arm_factor=float(getattr(args, "task4_single_arm_factor")),
-            bimanual_factor=float(getattr(args, "task4_bimanual_factor")),
             box_pose_position_threshold=float(getattr(args, "task4_box_pose_position_threshold")),
             box_pose_orientation_threshold=float(getattr(args, "task4_box_pose_orientation_threshold")),
+            contact_distance_threshold=float(getattr(args, "task4_contact_distance_threshold")),
         )
 
     elif task == "task2":
@@ -867,10 +1042,13 @@ def create_task_assertion(task: str, args) -> TaskAssertion:
             },
             conveyor_drop_z=float(getattr(args, "task2_conveyor_drop_z")),
             bin_half_size=tuple(getattr(args, "task2_bin_half_size")),
-            grab_score_per_part=int(getattr(args, "task2_grab_score_per_part")),
-            sort_score_per_part=int(getattr(args, "task2_sort_score_per_part")),
+            grab_score_per_part=float(getattr(args, "task2_grab_score_per_part")),
+            sort_score_per_part=float(getattr(args, "task2_sort_score_per_part")),
             max_parts=int(getattr(args, "task2_max_parts")),
             success_score_threshold=int(getattr(args, "task2_success_score_threshold")),
+            follow_score_per_part=float(getattr(args, "task2_follow_score_per_part")),
+            follow_distance_threshold=float(getattr(args, "task2_follow_distance_threshold")),
+            lift_delta=float(getattr(args, "task2_lift_delta")),
         )
 
     elif task == "task3":
@@ -880,6 +1058,14 @@ def create_task_assertion(task: str, args) -> TaskAssertion:
             dist_threshold=float(getattr(args, "task3_dist_threshold")),
             height_threshold=float(getattr(args, "task3_height_threshold")),
             success_score_threshold=int(getattr(args, "task3_success_score_threshold")),
+            grab_score_per_part=float(getattr(args, "task3_grab_score_per_part")),
+            insert_score_per_part=float(getattr(args, "task3_insert_score_per_part")),
+            max_parts=int(getattr(args, "task3_max_parts")),
+            lift_delta=float(getattr(args, "task3_lift_delta")),
+            time_full_score=int(getattr(args, "task3_time_full_score")),
+            time_full_time_seconds=float(getattr(args, "task3_time_full_time_seconds")),
+            time_penalty_interval_seconds=float(getattr(args, "task3_time_penalty_interval_seconds")),
+            time_penalty_per_interval=int(getattr(args, "task3_time_penalty_per_interval")),
         )
 
     else:

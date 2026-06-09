@@ -19,6 +19,117 @@ def _extract_semantics(part: PartPoseDict) -> str:
 
 
 
+def _part_id(part: PartPoseDict, idx: int) -> str:
+    """从零件字典中提取唯一标识符，优先使用 prim_path，回退到索引序号。"""
+    return str(part.get("prim_path", f"part_{idx}"))
+
+
+def _is_released(part: PartPoseDict, require_released: bool) -> bool:
+    """检查零件是否已释放：若不需要释放条件则始终返回 True，否则读取 released 字段。"""
+    if not require_released:
+        return True
+    return bool(part.get("released", False))
+
+
+def _is_static(part: PartPoseDict, require_static: bool) -> bool:
+    """检查零件是否已静止：若不需要静止条件则始终返回 True，否则读取 static 字段。"""
+    if not require_static:
+        return True
+    return bool(part.get("static", False))
+
+
+def calculate_time_score(
+    elapsed_seconds: float,
+    full_score: float,
+    full_time_seconds: float,
+    penalty_interval_seconds: float,
+    penalty_per_interval: float,
+) -> float:
+    """通用时间评分函数（官方标准）。
+
+    在 full_time_seconds 秒内完成得满分 full_score；
+    每超过 penalty_interval_seconds 秒扣 penalty_per_interval 分，最低 0 分。
+
+    Args:
+        elapsed_seconds: 实际耗时（秒）。
+        full_score: 时间满分。
+        full_time_seconds: 获得满分的时间上限（秒）。
+        penalty_interval_seconds: 扣分时间间隔（秒）。
+        penalty_per_interval: 每个间隔扣除的分数。
+
+    Returns:
+        float: 时间得分。
+    """
+    t = max(0.0, float(elapsed_seconds))
+    full = float(full_score)
+    if t <= float(full_time_seconds):
+        return full
+    overtime = t - float(full_time_seconds)
+    penalty_steps = int(np.ceil(overtime / float(penalty_interval_seconds)))
+    penalty = penalty_steps * float(penalty_per_interval)
+    return max(0.0, full - penalty)
+
+
+def check_parts_lifted_from_initial_height(
+    parts_poses_dict: Any,
+    initial_heights: dict[str, float],
+    scored_parts: Iterable[str] | None = None,
+    lift_delta: float = 0.10,
+    score_per_part: float = 10.0,
+    max_parts: int = 4,
+) -> tuple[float, set[str]]:
+    """基于初始高度判定零件抬升得分（官方标准）。
+
+    零件当前 z 高度 >= 该零件初始 z 高度 + lift_delta 时计分一次。
+
+    Args:
+        parts_poses_dict: 零件位姿列表。
+        initial_heights: 每个零件的初始 z 高度映射 {prim_path: z}。
+        scored_parts: 已计分的零件 ID 集合。
+        lift_delta: 抬升判定的高度差阈值（米），默认 0.10。
+        score_per_part: 每个零件得分。
+        max_parts: 最大计分零件数。
+
+    Returns:
+        (score, scored_parts): 总分和已计分零件集合。
+    """
+    current_scored_parts: set[str] = set(scored_parts or [])
+    parts = iter_part_dicts(parts_poses_dict)
+    for idx, part in enumerate(parts):
+        part_id = _part_id(part, idx)
+        if part_id in current_scored_parts:
+            continue
+        pos = safe_vec3(part.get("position"))
+        if pos is None or part_id not in initial_heights:
+            continue
+        if float(pos[2]) >= float(initial_heights[part_id]) + float(lift_delta):
+            current_scored_parts.add(part_id)
+            if len(current_scored_parts) >= int(max_parts):
+                break
+    score = min(float(score_per_part) * int(max_parts), len(current_scored_parts) * float(score_per_part))
+    return score, current_scored_parts
+
+
+def point_in_aabb(point: np.ndarray, center: np.ndarray, half_size: tuple[float, float, float]) -> bool:
+    """判断三维点是否在轴对齐包围盒（AABB）内。
+
+    Args:
+        point: 待检测点 (3,)。
+        center: 包围盒中心 (3,)。
+        half_size: 包围盒半尺寸 (hx, hy, hz)。
+
+    Returns:
+        bool: 点在包围盒内返回 True。
+    """
+    rel = point - center
+    hx, hy, hz = float(half_size[0]), float(half_size[1]), float(half_size[2])
+    return (
+        abs(float(rel[0])) <= hx
+        and abs(float(rel[1])) <= hy
+        and abs(float(rel[2])) <= hz
+    )
+
+
 # ----------------- Task1 评估工具函数 -----------------
 
 def task1_check_parts_in_box(
@@ -28,6 +139,8 @@ def task1_check_parts_in_box(
     box_half_size: tuple[float, float, float] = (0.095, 0.145, 0.25),
     score_per_part: int = 10,
     max_parts: int = 4,
+    require_released: bool = False,
+    require_static: bool = False,
 ) -> tuple[int, set[str]]:
     """
     Task1 入箱评分（40分满分，每个工件10分）：
@@ -61,7 +174,12 @@ def task1_check_parts_in_box(
             sem = _extract_semantics(part)
             # 将箱体按 y 轴分成 A/B 两个类别区域：A 在负半轴，B 在正半轴。
             correct_category = (sem == "B" and rel[1] >= 0.0) or (sem == "A" and rel[1] < 0.0)
-            if not correct_category: 
+            if not correct_category:
+                continue
+
+            if not _is_released(part, require_released):
+                continue
+            if not _is_static(part, require_static):
                 continue
 
             current_scored_parts.add(part_id)
@@ -117,22 +235,17 @@ def task1_time_out_check(
     penalty_interval_seconds: float = 30.0,
     penalty_per_interval: int = 5,
 ) -> int:
+    """Task1 时间评分（官方标准，满分 20）。
+
+    180 秒内完成得满分，每超 30 秒扣 5 分，最低 0 分。
     """
-    Task1 时间评分（20分满分）：
-    - 40秒内得20分
-    - 每超过10秒扣5分
-    - 最低0分
-    """
-    try:
-        t = max(0.0, float(elapsed_seconds))
-        if t <= float(full_time_seconds):
-            return int(full_score)
-        overtime = t - float(full_time_seconds)
-        penalty_steps = int(np.ceil(overtime / float(penalty_interval_seconds)))
-        penalty = min(int(full_score), penalty_steps * int(penalty_per_interval))
-        return max(0, int(full_score) - penalty)
-    except Exception as e:
-        raise Exception(f"task1_time_out_check 异常: {e}")
+    return int(calculate_time_score(
+        elapsed_seconds=elapsed_seconds,
+        full_score=full_score,
+        full_time_seconds=full_time_seconds,
+        penalty_interval_seconds=penalty_interval_seconds,
+        penalty_per_interval=penalty_per_interval,
+    ))
 
 
 
@@ -143,8 +256,10 @@ def task2_check_parts_grabbed(
     parts_poses_dict: Any,
     conveyor_limits: dict[str, tuple[float, float]],
     scored_parts: Iterable[str] | None = None,
-    score_per_part: int = 10,
-    max_parts: int = 10,
+    score_per_part: float = 5.0,
+    max_parts: int = 8,
+    initial_heights: dict[str, float] | None = None,
+    lift_delta: float = 0.10,
 ) -> tuple[int, set[str], dict]:
     """
     Task2 抓取评分：检查工件是否脱离传送带。
@@ -183,11 +298,16 @@ def task2_check_parts_grabbed(
             if pos is None:
                 continue
 
-            is_grabbed = float(pos[2]) > grab_threshold
+            if initial_heights is not None and part_id in initial_heights:
+                is_grabbed = float(pos[2]) >= float(initial_heights[part_id]) + float(lift_delta)
+                grab_threshold_val = float(initial_heights[part_id]) + float(lift_delta)
+            else:
+                is_grabbed = float(pos[2]) > grab_threshold
+                grab_threshold_val = float(grab_threshold)
             details[part_id] = {
                 "grabbed": bool(is_grabbed),
                 "z_height": float(pos[2]),
-                "grab_threshold": float(grab_threshold),
+                "grab_threshold": grab_threshold_val,
             }
 
             if is_grabbed:
@@ -196,7 +316,7 @@ def task2_check_parts_grabbed(
                 if len(current_scored_parts) >= int(max_parts):
                     break
 
-        score = min(int(score_per_part) * int(max_parts), len(current_scored_parts) * int(score_per_part))
+        score = min(float(score_per_part) * int(max_parts), len(current_scored_parts) * float(score_per_part))
         return int(score), current_scored_parts, details
     except Exception as e:
         raise Exception(f"task2_check_parts_grabbed 异常: {e}")
@@ -208,8 +328,10 @@ def task2_check_parts_in_correct_bin(
     right_bin_pose: tuple[np.ndarray, np.ndarray],
     bin_half_size: tuple[float, float, float] = (0.15, 0.10, 0.05),
     scored_parts: Iterable[str] | None = None,
-    score_per_part: int = 10,
-    max_parts: int = 10,
+    score_per_part: float = 5.0,
+    max_parts: int = 8,
+    require_released: bool = False,
+    require_static: bool = False,
 ) -> tuple[int, set[str], dict]:
     """
     Task2 分拣评分：检查工件是否在正确类别的料箱内。
@@ -276,6 +398,8 @@ def task2_check_parts_in_correct_bin(
 
             # A工件应在左料箱，B工件应在右料箱
             is_correct = (sem == "A" and in_left_bin) or (sem == "B" and in_right_bin)
+            if is_correct and (not _is_released(part, require_released) or not _is_static(part, require_static)):
+                is_correct = False
             in_any_bin = in_left_bin or in_right_bin
 
             details[part_id] = {
@@ -290,7 +414,7 @@ def task2_check_parts_in_correct_bin(
                 if len(current_scored_parts) >= int(max_parts):
                     break
 
-        score = min(int(score_per_part) * int(max_parts), len(current_scored_parts) * int(score_per_part))
+        score = min(float(score_per_part) * int(max_parts), len(current_scored_parts) * float(score_per_part))
         return int(score), current_scored_parts, details
     except Exception as e:
         raise Exception(f"task2_check_parts_in_correct_bin 异常: {e}")
@@ -327,6 +451,55 @@ def task2_calculate_total_score(
         "max_grab_score": int(max_grab_score),
         "max_sort_score": int(max_sort_score),
     }
+
+
+def task2_check_end_effector_followed_parts(
+    parts_poses_dict: Any,
+    ee_poses: dict[str, Any],
+    scored_parts: Iterable[str] | None = None,
+    distance_threshold: float = 0.10,
+    score_per_part: float = 2.5,
+    max_parts: int = 8,
+) -> tuple[float, set[str], dict]:
+    """Task2 跟随评分（官方标准，满分 20，每个零件 2.5 分）。
+
+    任一端执行器到达零件 10 cm 范围内即计分，每个零件只计一次。
+
+    Args:
+        parts_poses_dict: 零件位姿列表。
+        ee_poses: 端执行器位姿字典，值需包含至少 3 个位置分量。
+        scored_parts: 已计分的零件 ID 集合。
+        distance_threshold: 跟随距离阈值（米），默认 0.10。
+        score_per_part: 每个零件得分，默认 2.5。
+        max_parts: 最大计分零件数，默认 8。
+
+    Returns:
+        (score, scored_parts, details): 跟随总分、已计分集合、每个零件的距离详情。
+    """
+    current_scored_parts: set[str] = set(scored_parts or [])
+    details: dict[str, dict] = {}
+    ee_points: list[np.ndarray] = []
+    for value in ee_poses.values():
+        vec = safe_vec3(value)
+        if vec is not None:
+            ee_points.append(vec)
+
+    for idx, part in enumerate(iter_part_dicts(parts_poses_dict)):
+        part_id = _part_id(part, idx)
+        pos = safe_vec3(part.get("position"))
+        if pos is None or not ee_points:
+            continue
+        distances = [float(np.linalg.norm(pos - ee_pos)) for ee_pos in ee_points]
+        min_distance = min(distances)
+        followed = min_distance <= float(distance_threshold)
+        details[part_id] = {"followed": followed, "min_distance": min_distance}
+        if followed and part_id not in current_scored_parts:
+            current_scored_parts.add(part_id)
+            if len(current_scored_parts) >= int(max_parts):
+                break
+
+    score = min(float(score_per_part) * int(max_parts), len(current_scored_parts) * float(score_per_part))
+    return score, current_scored_parts, details
 
 
 # ------------------------task3评估工具------------------------------
@@ -430,17 +603,85 @@ def task3_calculate_specific_score(
                 
     return min(90, total_score), scored_parts
 
+def task3_check_parts_inserted_in_slots(
+    parts_poses_dict: Any,
+    slots: list[dict],
+    scored_parts: Iterable[str] | None = None,
+    used_slots: Iterable[str] | None = None,
+    dist_threshold: float = 0.05,
+    height_threshold: float = 0.03,
+    score_per_part: float = 7.5,
+    max_parts: int = 6,
+    require_released: bool = False,
+    require_static: bool = False,
+) -> tuple[float, set[str], set[str]]:
+    """Task3 嵌装评分（官方标准，满分 45，每个零件 7.5 分）。
+
+    零件按语义类别(A/B)匹配对应槽位，水平距离和高度差均在阈值内即计分。
+    每槽位最多使用一次，每零件最多计分一次。
+
+    Args:
+        parts_poses_dict: 零件位姿列表。
+        slots: 槽位信息列表，每项含 slot_id、type、position。
+        scored_parts: 已计分的零件 ID 集合。
+        used_slots: 已被占用的槽位 ID 集合。
+        dist_threshold: 水平距离阈值（米），默认 0.05。
+        height_threshold: 高度差阈值（米），默认 0.03。
+        score_per_part: 每个零件得分，默认 7.5。
+        max_parts: 最大计分零件数，默认 6。
+        require_released: 是否要求零件已释放。
+        require_static: 是否要求零件已静止。
+
+    Returns:
+        (score, scored_parts, used_slots): 嵌装总分、已计分零件集合、已占用槽位集合。
+    """
+    current_scored_parts: set[str] = set(scored_parts or [])
+    current_used_slots: set[str] = set(used_slots or [])
+
+    for idx, part in enumerate(iter_part_dicts(parts_poses_dict)):
+        part_id = _part_id(part, idx)
+        if part_id in current_scored_parts:
+            continue
+        if not _is_released(part, require_released) or not _is_static(part, require_static):
+            continue
+        part_pos = safe_vec3(part.get("position"))
+        if part_pos is None:
+            continue
+        sem = _extract_semantics(part)
+        for slot in slots:
+            slot_id = str(slot["slot_id"])
+            if slot_id in current_used_slots:
+                continue
+            if str(slot["type"]).upper() != sem:
+                continue
+            slot_pos = safe_vec3(slot["position"])
+            if slot_pos is None:
+                continue
+            horizontal_dist = float(np.linalg.norm(part_pos[:2] - slot_pos[:2]))
+            height_diff = abs(float(part_pos[2]) - float(slot_pos[2]))
+            if horizontal_dist <= float(dist_threshold) and height_diff <= float(height_threshold):
+                current_scored_parts.add(part_id)
+                current_used_slots.add(slot_id)
+                break
+        if len(current_scored_parts) >= int(max_parts):
+            break
+
+    score = min(float(score_per_part) * int(max_parts), len(current_scored_parts) * float(score_per_part))
+    return score, current_scored_parts, current_used_slots
+
+
 def task3_time_score(elapsed: float) -> int:
-    """在2分钟内完成得10分，每超30秒扣5分，扣完为止"""
-    if elapsed <= 120.0: 
-        return 10
-    
-    over_time = elapsed - 120.0
-    # np.ceil 确保只要超过一点点（比如超了1秒），就开始算作扣1次（5分）
-    penalty_steps = int(np.ceil(over_time / 30.0))
-    penalty = penalty_steps * 5
-    
-    return max(0, 10 - penalty)
+    """Task3 时间评分（官方标准，满分 10）。
+
+    360 秒内完成得满分，每超 60 秒扣 5 分，最低 0 分。
+    """
+    return int(calculate_time_score(
+        elapsed_seconds=elapsed,
+        full_score=10,
+        full_time_seconds=360.0,
+        penalty_interval_seconds=60.0,
+        penalty_per_interval=5,
+    ))
 
 
 # ----------------- Task4 评估工具函数 -----------------
@@ -520,23 +761,22 @@ def task4_check_long_edge_close_score(
 
 def task4_time_score(
     elapsed_seconds: float,
-    full_score: int = 40,
+    full_score: int = 10,
     full_time_seconds: float = 180.0,
     penalty_interval_seconds: float = 30.0,
     penalty_per_interval: int = 5,
 ) -> int:
+    """Task4 时间评分（官方标准，满分 10）。
+
+    180 秒内完成得满分，每超 30 秒扣 5 分，最低 0 分。
     """
-    Task4 时间评分：
-    - 2 分钟内满分（默认 40）
-    - 每超 10 秒扣 5 分，最低 0 分
-    """
-    t = max(0.0, float(elapsed_seconds))
-    if t <= float(full_time_seconds):
-        return int(full_score)
-    overtime = t - float(full_time_seconds)
-    penalty_steps = int(np.ceil(overtime / float(penalty_interval_seconds)))
-    penalty = penalty_steps * int(penalty_per_interval)
-    return int(max(0, int(full_score) - penalty))
+    return int(calculate_time_score(
+        elapsed_seconds=elapsed_seconds,
+        full_score=full_score,
+        full_time_seconds=full_time_seconds,
+        penalty_interval_seconds=penalty_interval_seconds,
+        penalty_per_interval=penalty_per_interval,
+    ))
 
 
 def task4_get_bimanual_collaboration_factor(
@@ -552,15 +792,14 @@ def task4_calculate_total_score(
     short_edge_score: int,
     long_edge_score: int,
     time_score: int,
-    collaboration_factor: float,
 ) -> dict:
-    """Task4 总分汇总：raw_score = 短边 + 长边 + 时间，final_score = raw_score * collaboration_factor。"""
+    """Task4 总分汇总（官方标准，无协作系数）。
+
+    总分 = 短边分 + 长边分 + 时间分，上限 100。
+    """
     raw_score = int(short_edge_score) + int(long_edge_score) + int(time_score)
-    raw_score = int(max(0, min(100, raw_score)))
-    final_score = int(round(raw_score * float(collaboration_factor)))
-    final_score = int(max(0, min(100, final_score)))
+    final_score = int(max(0, min(100, raw_score)))
     return {
-        "raw_score": raw_score,
+        "raw_score": final_score,
         "final_score": final_score,
-        "collaboration_factor": float(collaboration_factor),
     }

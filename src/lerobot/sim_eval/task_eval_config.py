@@ -85,24 +85,41 @@ def build_assertion_args_from_task_yaml(
 
 
 def _build_task1_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:
+    """从任务 YAML 构建 Task1 断言参数（官方标准）。
+
+    官方默认值：
+    - 抓取/放置: 每零件 10 分，最多 4 个，满分 40+40。
+    - 时间: 满分 20，180 秒内完成，每超 30 秒扣 5 分。
+    - 成功门槛: 80 分。
+    - 抬升判定: 相对初始高度提升 0.10 米。
+    """
     box_scale = _get_first_vector(task_config.get("box", {}).get("box_scale"), [0.38, 0.75, 0.36])
     return {
         "task1_lift_height": float(evaluation.get("lift_height", task_config.get("grasp", {}).get("lift_height", 0.17))),
         "task1_workspace_limits": evaluation.get("workspace_limits", build_workspace_limits(task_config)),
         "task1_box_half_size": evaluation.get("box_half_size", [box_scale[0] / 2.0, box_scale[1] / 2.0, box_scale[2] / 2.0]),
         "task1_lift_score_per_part": int(evaluation.get("lift_score_per_part", 10)),
-        "task1_box_score_per_part": int(evaluation.get("box_score_per_part", 15)),
+        "task1_box_score_per_part": int(evaluation.get("box_score_per_part", 10)),
         "task1_max_parts": int(evaluation.get("max_parts", task_config.get("part", {}).get("num_parts", 2) * 2)),
-        "task1_time_full_score": int(evaluation.get("time_full_score", 40)),
-        "task1_time_full_time_seconds": float(evaluation.get("time_full_time_seconds", float(task_config.get("timelimit", 100)))),
-        "task1_time_penalty_interval_seconds": float(evaluation.get("time_penalty_interval_seconds", 10.0)),
+        "task1_time_full_score": int(evaluation.get("time_full_score", 20)),
+        "task1_time_full_time_seconds": float(evaluation.get("time_full_time_seconds", 180.0)),
+        "task1_time_penalty_interval_seconds": float(evaluation.get("time_penalty_interval_seconds", 30.0)),
         "task1_time_penalty_per_interval": int(evaluation.get("time_penalty_per_interval", 5)),
-        "task1_success_score_threshold": int(evaluation.get("success_score_threshold", 60)),
+        "task1_success_score_threshold": int(evaluation.get("success_score_threshold", 80)),
         "task1_parts_movement_threshold": float(evaluation.get("parts_movement_threshold", 0.01)),
+        "task1_lift_delta": float(evaluation.get("lift_delta", 0.10)),
     }
 
 
 def _build_task2_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:
+    """从任务 YAML 构建 Task2 断言参数（官方标准）。
+
+    官方默认值：
+    - 跟随: 每零件 2.5 分，端执行器 10 cm 范围内计分，最多 8 个，满分 20。
+    - 抓取: 每零件 5 分，相对初始高度抬升 0.10 米计分，满分 40。
+    - 分拣: 每零件 5 分，正确料箱内释放静止后计分，满分 40。
+    - 成功门槛: 100 分。
+    """
     box_scale = _get_first_vector(task_config.get("box", {}).get("box_scale"), [0.38, 0.75, 0.36])
     scatter_area = task_config.get("grasp", {}).get("scatter_area", {}) or {}
     center = _coerce_vector(scatter_area.get("center"), [0.12, 0.26859, 1.2], 3)
@@ -117,11 +134,10 @@ def _build_task2_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -
         task_config.get("ConveyorBelt", {}).get("ConveyorBelt_position"),
         plane_position,
     )
-    max_parts = int(evaluation.get("max_parts", task_config.get("part", {}).get("num_parts", 5) * 2))
-    grab_score_per_part = int(evaluation.get("grab_score_per_part", 10))
-    sort_score_per_part = int(evaluation.get("sort_score_per_part", 10))
-    # 基础分满分 = 抓取(max_parts*10) + 分拣(max_parts*10)，门槛默认 75%
-    max_base = max_parts * grab_score_per_part + max_parts * sort_score_per_part
+    max_parts = int(evaluation.get("max_parts", task_config.get("part", {}).get("num_parts", 4) * 2))
+    grab_score_per_part = float(evaluation.get("grab_score_per_part", 5.0))
+    sort_score_per_part = float(evaluation.get("sort_score_per_part", 5.0))
+    follow_score_per_part = float(evaluation.get("follow_score_per_part", 2.5))
     return {
         "task2_conveyor_limits": evaluation.get("conveyor_limits", default_conveyor_limits),
         "task2_conveyor_drop_z": float(evaluation.get("conveyor_drop_z", conveyor_belt_position[2])),
@@ -129,11 +145,22 @@ def _build_task2_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -
         "task2_grab_score_per_part": grab_score_per_part,
         "task2_sort_score_per_part": sort_score_per_part,
         "task2_max_parts": max_parts,
-        "task2_success_score_threshold": int(evaluation.get("success_score_threshold", int(max_base * 0.75))),
+        "task2_success_score_threshold": int(evaluation.get("success_score_threshold", 100)),
+        "task2_follow_score_per_part": follow_score_per_part,
+        "task2_follow_distance_threshold": float(evaluation.get("follow_distance_threshold", 0.10)),
+        "task2_lift_delta": float(evaluation.get("lift_delta", 0.10)),
     }
 
 
 def _build_task3_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:
+    """从任务 YAML 构建 Task3 断言参数（官方标准）。
+
+    官方默认值：
+    - 抓取: 每零件 7.5 分，相对初始高度抬升 0.10 米计分，最多 6 个，满分 45。
+    - 嵌装: 每零件 7.5 分，匹配槽位内释放静止后计分，满分 45。
+    - 时间: 满分 10，360 秒内完成，每超 60 秒扣 5 分。
+    - 成功门槛: 90 分。
+    """
     box_positions = task_config.get("box", {}).get("box_position", []) or []
     box_scales = task_config.get("box", {}).get("box_scale", []) or []
     default_workspace_limits = _build_task3_workspace_limits(box_positions, box_scales)
@@ -143,10 +170,26 @@ def _build_task3_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -
         "task3_dist_threshold": float(evaluation.get("dist_threshold", 0.05)),
         "task3_height_threshold": float(evaluation.get("height_threshold", 0.1)),
         "task3_success_score_threshold": int(evaluation.get("success_score_threshold", 90)),
+        "task3_grab_score_per_part": float(evaluation.get("grab_score_per_part", 7.5)),
+        "task3_insert_score_per_part": float(evaluation.get("insert_score_per_part", 7.5)),
+        "task3_max_parts": int(evaluation.get("max_parts", task_config.get("part", {}).get("num_parts", 3) * 2)),
+        "task3_lift_delta": float(evaluation.get("lift_delta", 0.10)),
+        "task3_time_full_score": int(evaluation.get("time_full_score", 10)),
+        "task3_time_full_time_seconds": float(evaluation.get("time_full_time_seconds", 360.0)),
+        "task3_time_penalty_interval_seconds": float(evaluation.get("time_penalty_interval_seconds", 60.0)),
+        "task3_time_penalty_per_interval": int(evaluation.get("time_penalty_per_interval", 5)),
     }
 
 
 def _build_task4_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:
+    """从任务 YAML 构建 Task4 断言参数（官方标准）。
+
+    官方默认值：
+    - 短边: 每边 15 分，需端执行器接触后闭合，满分 30。
+    - 长边: 每边 15 分，需端执行器接触后闭合，满分 30。
+    - 时间: 满分 10，180 秒内完成，每超 30 秒扣 5 分。
+    - 已移除官方不存在的协作系数（single_arm_factor / bimanual_factor）。
+    """
     del task_config
     return {
         "task4_short_targets": evaluation.get("short_targets", [-3.3219733, -3.3213105]),
@@ -159,12 +202,11 @@ def _build_task4_args(task_config: dict[str, Any], evaluation: dict[str, Any]) -
         "task4_success_hold_steps": int(evaluation.get("success_hold_steps", 10)),
         "task4_short_edge_score_per_edge": int(evaluation.get("short_edge_score_per_edge", 15)),
         "task4_long_edge_score_per_edge": int(evaluation.get("long_edge_score_per_edge", 15)),
-        "task4_time_full_score": int(evaluation.get("time_full_score", 40)),
-        "task4_time_full_time_seconds": float(evaluation.get("time_full_time_seconds", 120.0)),
-        "task4_time_penalty_interval_seconds": float(evaluation.get("time_penalty_interval_seconds", 10.0)),
+        "task4_time_full_score": int(evaluation.get("time_full_score", 10)),
+        "task4_time_full_time_seconds": float(evaluation.get("time_full_time_seconds", 180.0)),
+        "task4_time_penalty_interval_seconds": float(evaluation.get("time_penalty_interval_seconds", 30.0)),
         "task4_time_penalty_per_interval": int(evaluation.get("time_penalty_per_interval", 5)),
-        "task4_single_arm_factor": float(evaluation.get("single_arm_factor", 0.7)),
-        "task4_bimanual_factor": float(evaluation.get("bimanual_factor", 1.0)),
+        "task4_contact_distance_threshold": float(evaluation.get("contact_distance_threshold", 0.05)),
         "task4_box_pose_position_threshold": float(evaluation.get("box_pose_position_threshold", 1.0)),
         "task4_box_pose_orientation_threshold": float(evaluation.get("box_pose_orientation_threshold", 1.0)),
     }
