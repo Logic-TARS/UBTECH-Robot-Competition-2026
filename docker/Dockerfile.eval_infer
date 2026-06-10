@@ -44,7 +44,9 @@ RUN if [[ -f pyproject.toml ]]; then \
         sed -i 's/packaging[^"]*/packaging/g' pyproject.toml; \
     fi
 
-RUN /isaac-sim/python.sh -m pip install --no-cache-dir -i ${PIP_INDEX_URL} -e .
+RUN /isaac-sim/python.sh -m pip install --no-cache-dir -i ${PIP_INDEX_URL} -e . \
+    && /isaac-sim/python.sh -m pip install --no-cache-dir -i ${PIP_INDEX_URL} -e ".[smolvla]" \
+    && /isaac-sim/python.sh -m pip install --no-cache-dir -i ${PIP_INDEX_URL} -e ".[pi]"
 
 RUN /isaac-sim/python.sh -m pip uninstall -y numpy numba lxml usd-core usd-core-parser docstring-parser \
     && /isaac-sim/python.sh -m pip install --no-cache-dir -i ${PIP_INDEX_URL} \
