@@ -66,3 +66,13 @@
 | 4 | [模型训练](https://docs.ubtrobot.com/GHRC2026_CompetitionRules/docs/4/) | ACT、Diffusion Policy、π₀ (PI0)、π₀.₅ (PI05)、SmolVLA 等策略的完整训练指南与超参数说明。 |
 | 5 | [策略推理](https://docs.ubtrobot.com/GHRC2026_CompetitionRules/docs/5) | 使用训练好的策略模型进行推理并自动录制结果。 |
 | 6 | [四目实时显示](https://docs.ubtrobot.com/GHRC2026_CompetitionRules/docs/6/) | 4 个 RGB 相机的实时预览与可视化配置，支持遥操作、数据采集、回放和推理四种模式。 |
+
+### 评测系统补充文档
+
+正式评测部署、自定义策略接入和外部算法项目迁移，请参考以下本地文档：
+
+| 文档 | 说明 |
+| --- | --- |
+| [评测系统使用指南](docs/eval_guide.md) | 双容器评测流程、配置说明、多任务 policy 路径、故障排查和自动化编排。 |
+| [自定义策略接入指南](docs/custom_policy.md) | LeRobot policy 加载边界、自定义 `PolicyAdapter` 接口、零动作示例和 action/observation 规范。 |
+| [外部算法项目迁移示例](docs/external_algorithm_migration.md) | 将已有算法项目文件夹迁移到评测仓库，并通过 `ghrc_adapter.py` 包装接入。 |

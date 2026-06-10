@@ -39,7 +39,7 @@ LOG_ROOT="${LOG_ROOT:-${DEFAULT_LOG_ROOT}}"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 RUN_LOG_DIR="${LOG_ROOT}/${RUN_ID}"
 
-LOG_INCLUDE_PATTERN='Episode.*step=|SUCCESS|FAILED|成功|失败|异常|汇总|Score|Connected|INIT'
+LOG_INCLUDE_PATTERN='Sim-Eval 容器启动|配置文件：|任务：|Episodes:|连接机器人|连接 infer|auto_start|按 Enter|开始评估|开始 Episode|Episode.*step=|SUCCESS|FAILED|TIMEOUT|成功|失败|异常|汇总|Score|Connected|INIT|等待 infer action 超时|运行异常'
 LOG_EXCLUDE_PATTERN='Warning.*usd|omni\.physicsschema'
 
 PYTHON="/isaac-sim/python.sh"
@@ -198,8 +198,8 @@ run_sim_with_logging() {
         "${SIM_IMAGE}" \
         -c "cd ${CONTAINER_WS}; $(runtime_bootstrap_cmd) ${PYTHON} -m lerobot.scripts.ghrc_eval_sim ${sim_args}" 2>&1 \
         | tee "${sim_log_file}" \
-        | grep -E "${LOG_INCLUDE_PATTERN}" \
-        | grep -vE "${LOG_EXCLUDE_PATTERN}"
+        | grep --line-buffered -E "${LOG_INCLUDE_PATTERN}" \
+        | grep --line-buffered -vE "${LOG_EXCLUDE_PATTERN}"
 
     pipe_status=("${PIPESTATUS[@]}")
     sim_status="${pipe_status[0]}"

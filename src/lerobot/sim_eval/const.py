@@ -31,10 +31,10 @@ TASK_DEFAULT_TEXT: dict[str, str] = {
 }
 
 TASK_DEFAULT_POLICY_PATH: dict[str, str] = {
-    "task1": "challenge2026_baseline/task1/act/pretrained_model",
-    "task2": "challenge2026_baseline/task2/act_001/checkpoints/050000/pretrained_model",
-    "task3": "challenge2026_baseline/task3/act/checkpoints/last/pretrained_model",
-    "task4": "challenge2026_baseline/task4/act/pretrained_model",
+    "task1": "challenge2026_baseline/Part_Sorting/act/pretrained_model",
+    "task2": "challenge2026_baseline/Conveyor_Sorting/act/pretrained_model",
+    "task3": "challenge2026_baseline/Foam_Inlaying/act/pretrained_model",
+    "task4": "challenge2026_baseline/Packing_Box/act/pretrained_model",
 }
 
 TASK_DEFAULT_MAX_STEPS: dict[str, int] = {

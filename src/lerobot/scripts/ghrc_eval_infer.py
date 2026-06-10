@@ -16,23 +16,23 @@ from __future__ import annotations
 
 import argparse
 import logging
-from pathlib import Path
 import queue
 import threading
 import time
 import traceback
+from pathlib import Path
 from typing import Any
 
 import torch
 
 from src.lerobot.sim_eval import (
-    InferenceContext,
-    ResetContext,
     TASK_CHOICES,
     TASK_DEFAULT_CONFIG_PATH,
     TASK_DEFAULT_MAX_STEPS,
     TASK_DEFAULT_POLICY_PATH,
     TASK_DEFAULT_TEXT,
+    InferenceContext,
+    ResetContext,
     create_policy_adapter,
     load_container_config,
     require_config_keys,
@@ -42,8 +42,8 @@ from src.lerobot.sim_eval.policy_adapter import PolicyAdapter
 from src.lerobot.sim_eval.protocol import (
     DEFAULT_CONNECTION_TIMEOUT,
     DEFAULT_HEARTBEAT_INTERVAL,
-    DEFAULT_WEBSOCKET_MAX_SIZE_BYTES,
     DEFAULT_WEBSOCKET_CONTROL_PORT,
+    DEFAULT_WEBSOCKET_MAX_SIZE_BYTES,
     DEFAULT_WEBSOCKET_SERVER_HOST,
     DEFAULT_WEBSOCKET_STREAM_PORT,
     get_observation_from_message,
@@ -361,6 +361,8 @@ def parse_args() -> argparse.Namespace:
             "adapter_type": "lerobot",
             "adapter_class": None,
             "adapter_config": {},
+            "task_policy_paths": {},
+            "require_task_policy_paths": False,
             "websocket_server_host": DEFAULT_WEBSOCKET_SERVER_HOST,
             "websocket_control_port": DEFAULT_WEBSOCKET_CONTROL_PORT,
             "websocket_stream_port": DEFAULT_WEBSOCKET_STREAM_PORT,
@@ -386,10 +388,39 @@ def parse_args() -> argparse.Namespace:
     adapter_type = str(getattr(args, "adapter_type", "lerobot")).lower()
     if adapter_type == "lerobot" and not getattr(args, "adapter_class", None):
         require_config_keys(args, ["policy_type"], "infer 容器配置")
+        _resolve_policy_path_for_task(args)
         if not getattr(args, "policy_path", None) and args.task in TASK_DEFAULT_POLICY_PATH:
             args.policy_path = str(Path(TASK_DEFAULT_POLICY_PATH[args.task]))
         require_config_keys(args, ["policy_type", "policy_path"], "infer 容器配置")
     return args
+
+
+def _resolve_policy_path_for_task(args: argparse.Namespace) -> None:
+    """Resolve task-specific policy path overrides from YAML.
+
+    `run_eval.sh all` reuses one infer YAML and only changes `--task`.
+    A single `policy_path` cannot point to four task checkpoints, so YAML may
+    provide `task_policy_paths: {task1: ..., task2: ...}`. Values are resolved
+    relative to the config file directory, matching `load_container_config`
+    behavior for top-level path fields.
+    """
+
+    task_policy_paths = getattr(args, "task_policy_paths", {}) or {}
+    if not isinstance(task_policy_paths, dict):
+        raise ValueError("infer 容器配置 task_policy_paths 必须是字典")
+
+    config_dir = Path(str(args.config)).expanduser().resolve().parent
+    task = str(args.task).lower()
+    selected_path = task_policy_paths.get(task) or getattr(args, "policy_path", None)
+    if not selected_path:
+        if bool(getattr(args, "require_task_policy_paths", False)):
+            raise ValueError(
+                f"infer 容器配置要求显式 policy 路径，但 task_policy_paths 未提供当前任务：{task}"
+            )
+        return
+
+    selected = Path(str(selected_path)).expanduser()
+    args.policy_path = str(selected if selected.is_absolute() else (config_dir / selected).resolve())
 
 
 def main() -> None:

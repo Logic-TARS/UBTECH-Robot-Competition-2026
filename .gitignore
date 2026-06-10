@@ -102,3 +102,21 @@ compute_image_quantile_stats.py
 convert_merge_env_state.py
 process_converted_part_sorting_quantiles.py
 convert_split_env_state.py
+
+# 评测测试文件
+enter_infer.sh
+enter_sim.sh
+env.sh
+README_split_run.md
+run_infer_inside_container.sh
+run_sim_inside_container.sh
+eval_dataflow.md
+eval_overview.md
+eval_quickstart.md
+eval_quickstart.md
+eval_scoring.md
+eval_workflow.md
+eval_modules.md
+run_eval.md
+run.md
+tests/

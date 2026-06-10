@@ -444,7 +444,7 @@ class WalkerS2sim(Robot):
                 self._right_gripping = float(abs_action[19]) > 0.5
                 if self._right_gripping:
                     self._hold_finger_positions[2:4] = np.array([self._robot_interface.gripper_close_width]*2)
-            print(f"[_robot_control_callback] left_gripping={self._left_gripping}, right_gripping={self._right_gripping}")
+            # print(f"[_robot_control_callback] left_gripping={self._left_gripping}, right_gripping={self._right_gripping}")
         elif not self._go_home:
             # ====== 遥操作模式：通过 teleop 读取键盘状态，计算 IK ======
             if self._teleop is not None:
@@ -494,7 +494,7 @@ class WalkerS2sim(Robot):
         else:
             arm_finger_indices = self._robot_interface.arm_joint_indices + self._robot_interface.finger_joint_indices
             if not self._robot_interface.joint_interpolator.interp_active:
-                print('[_robot_control_callback] Starting interpolation to initial position...')
+                # print('[_robot_control_callback] Starting interpolation to initial position...')
                 self._robot_interface.joint_interpolator.set_target(
                     start_q=torch.tensor(self._robot_interface.get_joint_states()['all_positions'])[arm_finger_indices],
                     target_q=torch.tensor(self._robot_interface.initial_joint_positions)[arm_finger_indices],
@@ -513,7 +513,7 @@ class WalkerS2sim(Robot):
                 self._go_home = False  
                 all_positions = self._robot_interface.get_joint_states()['all_positions']
                 self._robot_interface.reset_ik(all_positions)  
-                print('[_robot_control_callback] Interpolation to initial position completed.')      
+                # print('[_robot_control_callback] Interpolation to initial position completed.')      
                       
         # 统一下发保持目标（joint positions 控制）
         self._robot_interface.set_arm_joint_positions(
@@ -811,7 +811,7 @@ class WalkerS2sim(Robot):
 
                 left_gripper = action.get("left_gripper", 0.0)
                 right_gripper = action.get("right_gripper", 0.0)
-                print(f"[send_action] left_gripper={left_gripper}, right_gripper={right_gripper}")
+                # print(f"[send_action] left_gripper={left_gripper}, right_gripper={right_gripper}")print
                 # 构建 20D action 数组用于验证
                 action_np = np.concatenate([
                     arm_positions,

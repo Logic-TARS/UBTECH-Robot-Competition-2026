@@ -62,6 +62,7 @@ try:
         create_policy_adapter,
         load_adapter_class,
     )
+    from .zero_action_policy import ZeroActionPolicyAdapter
     from .scoring import (
         calculate_time_score,
         check_parts_lifted_from_initial_height,
@@ -163,6 +164,7 @@ try:
             "LeRobotPolicyAdapter",
             "create_policy_adapter",
             "load_adapter_class",
+            "ZeroActionPolicyAdapter",
         ]
     )
 except ModuleNotFoundError:

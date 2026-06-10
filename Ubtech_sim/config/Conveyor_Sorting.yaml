@@ -3,13 +3,13 @@ root_path: "../../assets/resources/"
 
 scene_usd: 'Collected_Task4/SubUSDs/2_small_warehouse2.usd'
 
-timelimit: 100
+timelimit: 300           
 
 task_number: 2
 
 part:
-  part_a_usd: "Collected_Part_B_ori_color/Part_B.usd"
-  part_b_usd: "Collected_Task2_Part_A/Task2_Part_A.usd"
+  part_a_usd: "Collected_Task2_Part_A/Task2_Part_A.usd"
+  part_b_usd: "Collected_Part_B_ori_color/Part_B.usd"
   num_parts: 4
   part_distance: 0.4
 
@@ -22,10 +22,12 @@ plane:
 
 ConveyorBelt:
   ConveyorBelt_usd: 'Collected_ConveyorBelt_New/Collected_ConveyorBelt/ConveyorBelt.usd'
-  ConveyorBelt_position: 
+  ConveyorBelt_position:
   - [-0.13357845206723284, 0.26859, 0.0]
-  ConveyorBelt_scale: 
+  ConveyorBelt_scale:
   - [1.0, 1.0, 1.0]
+  ConveyorBelt_speed:
+  - [0.0142, 0.0, 0.0]
 
 table:
   table_usd: 'Collected_table_v2/table_v2.usd'
@@ -63,8 +65,6 @@ grasp:
   lift_time: 2.0
   tcp_offset: [0.0, 0.0, 0.0]   # sixforce_link 局部坐标系下 TCP 的偏移 (m)
   ik_rot_weight: 0.1
-  # 传动带中轴线起始端附近 (ConveyorBelt 中心 x=0.686, y=0.269)
-  # 物体应在带面入口端生成，算符及坐标根据具体 USD 模型调整
   scatter_area:
     center: [0.12, 0.26859, 1.2]   # 带面入口中心，高度参考 plane_position
     size:   [0.06, 0.04]               # 第一船 x方向, 第二船 y方向 (m)，紧贴带宽

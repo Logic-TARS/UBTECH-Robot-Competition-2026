@@ -12,14 +12,21 @@ part:
   part_b_usd: "Collected_Part_B_blue/Part_B.usd"
   num_parts: 3
   if_split_in_boxes: True
+  fixed_spawn:
+    enabled: true
+    anchor_fraction: 0.87
+    random_select: true
+    z_offset: 0.0
+    random_rotation: true
+    rotation_deg: [0, 0, 0]
 
 plane:
   plane_position: 
-  - [0.28, 0.3, 1.2]
-  - [1.25, 0.3, 1.2]
+  - [0.28, 0.3, 1.044]
+  - [1.25, 0.3, 1.034]
   plane_scale: 
-  - [0.1, 0.1, 0.1] 
-  - [0.1, 0.1, 0.1]
+  - [0.12, 0.23, 0.1] 
+  - [0.12, 0.23, 0.1]
 
 table:
   table_usd: 'Collected_table_v2/table_v2.usd'
@@ -36,7 +43,7 @@ box:
   box_scale: 
   - [0.5, 1.2, 0.3]
   - [0.5, 1.2, 0.3]
-  lock_boxes: true   # 禁止物理引擎移动箱子，保持固定位置
+  lock_boxes: true   
 
 robot:
   robot_usd: 'Collected_s2_v1_ecbg/s2_v1.usd' 
@@ -46,6 +53,7 @@ robot:
 foam:
   foam_usd: 'Collected_foam_collision/foam.usd' 
   foam_position: [0.76, 0.3, 1.0]
+  lock_foam: true  
 
 grasp:
   target_index: 0
@@ -55,5 +63,5 @@ grasp:
   reach_time: 2.0
   hold_time: 1.0
   lift_time: 2.0
-  tcp_offset: [0.0, 0.0, 0.22]   # sixforce_link 局部坐标系下 TCP 的偏移 (m)
+  tcp_offset: [0.0, 0.0, 0.22]   
   ik_rot_weight: 0.1
