@@ -1,51 +1,51 @@
-# GHRC 评测系统使用指南
+# GHRC Evaluation System User Guide
 
-本文面向赛事评测管理员、参赛队伍和本地复现人员，说明 GHRC 评测系统的运行方式、配置边界、自定义策略接入入口和自动化编排流程。
+This document is intended for evaluation administrators, contestant teams, and local reproduction personnel. It covers the operation of the GHRC evaluation system, configuration boundaries, custom policy integration entry points, and automated orchestration workflows.
 
-评测系统采用双容器隔离架构：`infer` 容器负责加载选手策略并通过 WebSocket 提供动作推理服务，`sim-eval` 容器负责启动 Isaac Sim、执行任务、采集结果和生成评分日志。两个容器之间使用 WebSocket 传输 msgpack + lz4 编码的观测与动作数据。
+The evaluation system uses a dual-container isolation architecture: the `infer` container loads contestant policies and provides action inference services via WebSocket, while the `sim-eval` container starts Isaac Sim, executes tasks, collects results, and generates scoring logs. The two containers communicate via WebSocket using msgpack + lz4 encoded observation and action data.
 
 ---
 
-## 1. 文档导航
+## 1. Document Navigation
 
-| 文档 | 适用场景 |
+| Document | Applicable Scenario |
 | --- | --- |
-| 本文档 | 评测系统部署、配置、运行、故障排查和自动化编排 |
-| [自定义策略接入指南](custom_policy.md) | 选手需要接入自定义 policy、修改 `adapter_class`、验证 action/observation 接口 |
-| [外部算法项目迁移示例](external_algorithm_migration.md) | 选手把已有算法项目文件夹迁移到评测仓库，并通过 `PolicyAdapter` 包装接入 |
+| This document | Evaluation system deployment, configuration, execution, troubleshooting, and automated orchestration |
+| [Custom Policy Integration Guide](custom_policy.md) | Contestants needing to integrate custom policies, modify `adapter_class`, or verify action/observation interfaces |
+| [External Algorithm Migration Example](external_algorithm_migration.md) | Contestants migrating an existing algorithm project folder into the eval repo, wrapped with `PolicyAdapter` |
 
-自定义策略接入请优先阅读 [自定义策略接入指南](custom_policy.md)。如果策略代码来自另一个完整项目目录，再继续阅读 [外部算法项目迁移示例](external_algorithm_migration.md)。
+For custom policy integration, read the [Custom Policy Integration Guide](custom_policy.md) first. If the policy code comes from another complete project directory, then continue with the [External Algorithm Migration Example](external_algorithm_migration.md).
 
 ---
 
-## 2. 系统职责边界
+## 2. System Responsibility Boundaries
 
-| 模块 | 容器 | 主要职责 | 是否允许选手修改 |
+| Module | Container | Primary Responsibility | Contestant May Modify? |
 | --- | --- | --- | --- |
-| `ghrc_eval_infer.py` | infer | 加载配置、加载 policy、启动 WebSocket 推理服务 | 原则上不建议修改；优先通过 YAML 和 `adapter_class` 扩展 |
-| `PolicyAdapter` | infer | 将评测 observation 转换为选手模型输入，并返回 action | 允许新增自定义 adapter |
-| `ghrc_eval_sim.py` | sim-eval | 启动仿真、连接 infer、执行 episode、解码 action | 不建议修改 |
-| `src/lerobot/sim_eval` | infer / sim-eval | 通信协议、容器配置、断言、评分相关公共逻辑 | 正式评测不允许修改协议、断言和评分逻辑 |
-| `ghrc_eval_orchestrator.py` | host | 批量拉取镜像、调用评测脚本、回写评测结果 | 评测平台侧维护，选手通常不需要修改 |
+| `ghrc_eval_infer.py` | infer | Load config, load policy, start WebSocket inference service | Not recommended; extend via YAML and `adapter_class` instead |
+| `PolicyAdapter` | infer | Convert evaluation observations to contestant model inputs and return actions | Allowed — add custom adapters |
+| `ghrc_eval_sim.py` | sim-eval | Start simulation, connect to infer, execute episodes, decode actions | Not recommended |
+| `src/lerobot/sim_eval` | infer / sim-eval | Communication protocol, container config, assertions, scoring logic | Modifying protocol, assertions, and scoring logic is prohibited |
+| `ghrc_eval_orchestrator.py` | host | Batch pull images, invoke evaluation scripts, write back results | Maintained by the evaluation platform; contestants generally do not need to modify |
 
-赛事交付中，选手应通过以下方式接入策略：
+In the contest deliverables, contestants should integrate policies via:
 
-- 标准 LeRobot checkpoint：修改 `eval_config/eval_infer.yaml` 中的 `policy_type`、`policy_path` 或 `task_policy_paths`。
-- 非标准策略或外部项目：新增自定义 `PolicyAdapter`，并在 `eval_config/eval_infer.yaml` 中配置 `adapter_class`。
+- Standard LeRobot checkpoint: modify `policy_type`, `policy_path`, or `task_policy_paths` in `eval_config/eval_infer.yaml`.
+- Non-standard policy or external project: add a custom `PolicyAdapter` and configure `adapter_class` in `eval_config/eval_infer.yaml`.
 
 ---
 
-## 3. 前置条件
+## 3. Prerequisites
 
-| 项目 | 要求 |
+| Item | Requirement |
 | --- | --- |
-| 镜像 | 已构建 `ghrc-eval-infer:latest` 和 `ghrc-eval-sim:latest` |
-| 模型 | LeRobot checkpoint 或自定义 policy 所需权重已放入容器可访问路径 |
-| GPU | `sim-eval` 容器需要可用 NVIDIA GPU；12GB 显存为最低运行要求 |
-| 资源 | 仿真资产、任务配置和基础依赖已按赛事说明准备完成 |
-| 网络 | 本机 8765 / 8766 端口未被其他进程占用 |
+| Images | `ghrc-eval-infer:latest` and `ghrc-eval-sim:latest` built |
+| Models | LeRobot checkpoint or custom policy weights placed in a container-accessible path |
+| GPU | `sim-eval` container requires an available NVIDIA GPU; 12 GB VRAM minimum |
+| Resources | Simulation assets, task configs, and base dependencies prepared per contest instructions |
+| Network | Host ports 8765 / 8766 not occupied by other processes |
 
-### 构建镜像
+### Building Images
 
 ```bash
 docker build -f docker/Dockerfile.eval_infer -t ghrc-eval-infer:latest .
@@ -54,19 +54,19 @@ docker build -f docker/Dockerfile.eval_sim   -t ghrc-eval-sim:latest .
 
 ---
 
-## 4. 配置文件说明
+## 4. Configuration File Descriptions
 
-| 配置文件 | 作用 | 常用修改项 |
+| Configuration File | Purpose | Commonly Modified Items |
 | --- | --- | --- |
-| `eval_config/eval_infer.yaml` | infer 容器配置 | `task`、`device`、`policy_type`、`policy_path`、`task_policy_paths`、`adapter_class`、`adapter_config` |
-| `eval_config/eval_sim.yaml` | sim-eval 容器配置 | `task`、`device`、`num_episodes`、`auto_start`、`enable_assertion`、WebSocket 连接端口 |
-| `eval_config/eval_orchestrator.yaml` | 自动化编排配置 | 飞书表格、镜像仓库、任务列表、超时时间、结果目录 |
+| `eval_config/eval_infer.yaml` | infer container config | `task`, `device`, `policy_type`, `policy_path`, `task_policy_paths`, `adapter_class`, `adapter_config` |
+| `eval_config/eval_sim.yaml` | sim-eval container config | `task`, `device`, `num_episodes`, `auto_start`, `enable_assertion`, WebSocket connection port |
+| `eval_config/eval_orchestrator.yaml` | Automated orchestration config | Feishu spreadsheet, image registry, task list, timeout, results directory |
 
-任务名可通过 CLI `--task` 或脚本参数覆盖 YAML 中的 `task`。正式评测建议以脚本传入任务名，保证同一套配置可以复用于 `task1` 到 `task4`。
+Task names can be overridden via CLI `--task` or script parameters. For official evaluation, passing the task name via script is recommended so the same config can be reused across `task1` through `task4`.
 
-### 4.1 多任务 policy 路径
+### 4.1 Multi-Task Policy Paths
 
-四个任务通常对应四个不同 checkpoint。不要依赖源码内置默认路径，建议在 `eval_config/eval_infer.yaml` 中显式配置：
+The four tasks typically correspond to four different checkpoints. Do not rely on hardcoded default paths in source code; explicitly configure them in `eval_config/eval_infer.yaml`:
 
 ```yaml
 policy_type: act
@@ -79,15 +79,15 @@ task_policy_paths:
   task4: ../challenge2026_baseline/task4/act/pretrained_model
 ```
 
-路径解析规则：
+Path resolution rules:
 
-- 绝对路径按原样使用。
-- 相对路径按 YAML 文件所在目录解析，例如 `eval_config/eval_infer.yaml` 中的 `../xxx` 会解析到仓库根目录下的 `xxx`。
-- `require_task_policy_paths: true` 时，当前任务缺少显式路径会直接报错，避免误用默认模型。
+- Absolute paths are used as-is.
+- Relative paths are resolved relative to the YAML file's directory. For example, `../xxx` in `eval_config/eval_infer.yaml` resolves to `xxx` under the repository root.
+- When `require_task_policy_paths: true`, missing an explicit path for the current task will raise an error, preventing accidental use of a default model.
 
-### 4.2 自定义 adapter 配置
+### 4.2 Custom Adapter Configuration
 
-自定义策略使用 `adapter_class` 接入：
+Custom policies are integrated via `adapter_class`:
 
 ```yaml
 adapter_class: my_team_policy.ghrc_adapter:MyAdapter
@@ -97,11 +97,11 @@ policy_type: null
 policy_path: /workspace/eval/my_team_policy/checkpoints/best.pt
 ```
 
-详细接口、零动作示例和外部项目迁移方式见 [自定义策略接入指南](custom_policy.md)。
+For detailed interfaces, the zero-action example, and external project migration, see the [Custom Policy Integration Guide](custom_policy.md).
 
-### 4.3 环境变量覆盖
+### 4.3 Environment Variable Overrides
 
-常用运行时环境变量：
+Common runtime environment variables:
 
 ```bash
 export INFER_IMAGE=ghrc-eval-infer:latest
@@ -112,124 +112,124 @@ export INFER_READY_TIMEOUT=300
 export HEADLESS=1
 ```
 
-| 变量 | 说明 |
+| Variable | Description |
 | --- | --- |
-| `INFER_IMAGE` | infer 容器镜像 |
-| `SIM_IMAGE` | sim-eval 容器镜像 |
-| `INFER_CONFIG` | infer 配置文件路径 |
-| `SIM_CONFIG` | sim-eval 配置文件路径 |
-| `INFER_READY_TIMEOUT` | 等待 infer WebSocket 端口就绪的最长秒数 |
-| `HEADLESS=1` | 无头模式，适合服务器和 CI |
-| `HEADLESS=0` | 桌面调试模式，显示 Isaac Sim 窗口 |
+| `INFER_IMAGE` | infer container image |
+| `SIM_IMAGE` | sim-eval container image |
+| `INFER_CONFIG` | infer configuration file path |
+| `SIM_CONFIG` | sim-eval configuration file path |
+| `INFER_READY_TIMEOUT` | Maximum seconds to wait for infer WebSocket port readiness |
+| `HEADLESS=1` | Headless mode, suitable for servers and CI |
+| `HEADLESS=0` | Desktop debug mode, displays the Isaac Sim window |
 
 ---
 
-## 5. 本地评测运行
+## 5. Local Evaluation Execution
 
-### 5.1 运行
+### 5.1 Running
 
 ```bash
 ./run_eval.sh task4
 ./run_eval.sh all
 ```
 
-运行流程：
+Execution flow:
 
-1. 后台启动 infer 容器。
-2. 等待 WebSocket 控制端口和数据端口就绪，默认 8765 / 8766。
-3. 前台启动 sim-eval 容器。
-4. sim-eval 连接 infer，逐步发送 observation 并接收 action。
-5. episode 结束后写入评测结果和日志。
+1. Start the infer container in the background.
+2. Wait for WebSocket control and data ports to become ready (default 8765 / 8766).
+3. Start the sim-eval container in the foreground.
+4. sim-eval connects to infer, sends observations step by step, and receives actions.
+5. After each episode, evaluation results and logs are written.
 
-### 5.2 输出目录
+### 5.2 Output Directories
 
-| 输出 | 路径 |
+| Output | Path |
 | --- | --- |
-| infer 关键日志 | `/tmp/eval_infer_{task}.log` |
-| sim-eval 结果 | `logs/sim_eval_container/` |
-| 自动化编排缓存 | `logs/eval_cache.csv` |
+| infer key logs | `/tmp/eval_infer_{task}.log` |
+| sim-eval results | `logs/sim_eval_container/` |
+| Automated orchestration cache | `logs/eval_cache.csv` |
 
 ---
 
-## 6. 自定义策略接入
+## 6. Custom Policy Integration
 
-评测系统只要求策略最终实现统一的推理接口：输入当前 observation，输出一维 action。推荐按复杂度选择接入方式：
+The evaluation system only requires that the policy ultimately implements a unified inference interface: receive the current observation, return a one-dimensional action. Choose the integration method based on complexity:
 
-| 接入方式 | 适用情况 | 文档 |
+| Integration Method | Applicable Scenario | Document |
 | --- | --- | --- |
-| LeRobot 默认 adapter | checkpoint 符合 LeRobot `from_pretrained` 和 `select_action` 接口 | [自定义策略接入指南](custom_policy.md) |
-| 自定义 `PolicyAdapter` | 自定义 PyTorch、ONNX、TensorRT、RL、规划器或混合算法 | [自定义策略接入指南](custom_policy.md) |
-| 外部项目迁移 | 策略来自另一个完整项目文件夹，需要保留原目录结构 | [外部算法项目迁移示例](external_algorithm_migration.md) |
+| LeRobot default adapter | Checkpoint conforms to LeRobot `from_pretrained` and `select_action` interface | [Custom Policy Integration Guide](custom_policy.md) |
+| Custom `PolicyAdapter` | Custom PyTorch, ONNX, TensorRT, RL, planner, or hybrid algorithm | [Custom Policy Integration Guide](custom_policy.md) |
+| External project migration | Policy comes from another complete project folder, need to preserve original directory structure | [External Algorithm Migration Example](external_algorithm_migration.md) |
 
-仓库提供两类最小验证示例：
+The repository provides two minimal verification examples:
 
-| 示例 | 用途 |
+| Example | Purpose |
 | --- | --- |
-| `eval_config/eval_infer_zero_action.yaml` | 输出全 0 action，验证 infer/sim 通信和 action 解码链路 |
-| `eval_config/eval_infer_external_random.yaml` | 使用外部项目目录输出随机 action，验证项目 import、adapter 加载和迁移结构 |
+| `eval_config/eval_infer_zero_action.yaml` | Outputs all-zero actions to verify infer/sim communication and action decoding pipeline |
+| `eval_config/eval_infer_external_random.yaml` | Uses an external project directory to output random actions, verifying project import, adapter loading, and migration structure |
 
-注意：`curl http://localhost:8765/` 返回 `426 Upgrade Required` 表示该端口是 WebSocket 服务，不是普通 HTTP 页面。这通常说明 infer 服务已在监听，需使用 sim-eval 或 WebSocket 客户端连接。
+Note: `curl http://localhost:8765/` returning `426 Upgrade Required` indicates the port is a WebSocket service, not a regular HTTP page. This usually means the infer service is listening — connect using sim-eval or a WebSocket client.
 
 ---
 
-## 7. 故障排查
+## 7. Troubleshooting
 
-| 问题 | 检查项 |
+| Problem | What to Check |
 | --- | --- |
-| infer 启动后无响应 | 查看 `docker logs eval_infer_{task}` 和 `/tmp/eval_infer_{task}.log` |
-| `curl` 返回 426 | 正常现象；8765 是 WebSocket 控制端口，不是浏览器 HTTP 服务 |
-| Isaac Sim 已打开但机器人不动 | 检查 `eval_config/eval_sim.yaml` 中 `auto_start` 是否为 `true`；为 `false` 时会等待键盘 Enter |
-| sim-eval 连接失败 | 确认 infer 容器仍在运行，8765 / 8766 端口映射一致 |
-| policy 路径错误 | 检查 `policy_path` 或 `task_policy_paths` 是否为容器内可访问路径 |
-| `adapter_class` 导入失败 | 确认模块路径可 import，项目目录在 `PYTHONPATH` 中，并且每级包目录包含 `__init__.py` |
-| action 维度异常 | 检查 `predict()` 是否返回一维 `torch.Tensor`、`np.ndarray` 或 `list[float]` |
-| GPU 显存不足 | 12GB 显存为最低要求，可减少 `num_episodes` 或使用更高显存 GPU |
+| infer unresponsive after startup | Check `docker logs eval_infer_{task}` and `/tmp/eval_infer_{task}.log` |
+| `curl` returns 426 | Normal; port 8765 is a WebSocket control port, not a browser HTTP service |
+| Isaac Sim open but robot not moving | Check whether `auto_start` is `true` in `eval_config/eval_sim.yaml`; `false` waits for keyboard Enter |
+| sim-eval connection failure | Confirm infer container is still running and ports 8765 / 8766 are mapped correctly |
+| Policy path error | Check whether `policy_path` or `task_policy_paths` is a container-accessible path |
+| `adapter_class` import failure | Confirm module path is importable, project directory is in `PYTHONPATH`, and each package directory contains `__init__.py` |
+| Action dimension anomaly | Check whether `predict()` returns a one-dimensional `torch.Tensor`, `np.ndarray`, or `list[float]` |
+| GPU out of memory | 12 GB VRAM is the minimum requirement; reduce `num_episodes` or use a GPU with more VRAM |
 
 ---
 
-## 8. 自动化编排
+## 8. Automated Orchestration
 
-编排系统从飞书多维表格读取选手提交的镜像，自动拉取镜像、运行评测、收集结果并回写分数。
+The orchestration system reads contestant-submitted images from a Feishu multi-dimensional table, automatically pulls images, runs evaluations, collects results, and writes back scores.
 
-### 8.1 前置条件
+### 8.1 Prerequisites
 
-| 项目 | 要求 |
+| Item | Requirement |
 | --- | --- |
-| 飞书应用 | 已创建企业自建应用，并获得 App ID / App Secret |
-| 表格权限 | 应用已添加到目标多维表格 |
-| 镜像仓库 | 评测机具备 Docker Hub、ACR 或企业私有仓库访问权限 |
-| 本地环境 | 已配置 Docker、NVIDIA Container Toolkit 和评测镜像 |
+| Feishu App | Create an enterprise self-built app and obtain App ID / App Secret |
+| Table Permissions | App added to the target multi-dimensional table |
+| Image Registry | Evaluation machine has access to Docker Hub, ACR, or enterprise private registry |
+| Local Environment | Docker, NVIDIA Container Toolkit, and evaluation images configured |
 
-### 8.2 飞书配置
+### 8.2 Feishu Configuration
 
-1. 打开 [飞书开发者后台](https://open.feishu.cn)，创建企业自建应用，记录 **App ID** 和 **App Secret**。
-2. 在应用详情的权限管理中勾选权限，并发布新版本。
+1. Open the [Feishu Developer Console](https://open.feishu.cn), create an enterprise self-built app, and record the **App ID** and **App Secret**.
+2. In the app details under Permission Management, select permissions and publish a new version.
 
-| 权限 | 用途 |
+| Permission | Purpose |
 | --- | --- |
-| `bitable:app` | 读取多维表格 |
-| `base:record:update` | 写入评测状态和分数 |
+| `bitable:app` | Read multi-dimensional table |
+| `base:record:update` | Write evaluation status and scores |
 
-3. 打开飞书表格，选择右上角菜单，添加文档应用。
-4. 从表格 URL 获取 `BITABLE_APP_TOKEN` 和 `TABLE_ID`。
+3. Open the Feishu table, select the menu in the upper-right corner, and add the document app.
+4. Obtain `BITABLE_APP_TOKEN` and `TABLE_ID` from the table URL.
 
 ```text
 https://xxx.feishu.cn/base/BITABLE_APP_TOKEN?table=TABLE_ID
 ```
 
-推荐表格列结构：
+Recommended table column structure:
 
-| 列名 | 类型 | 说明 |
+| Column Name | Type | Description |
 | --- | --- | --- |
-| 队伍编号 | 文本 | 唯一标识 |
-| 队伍名称 | 文本 | 展示名称 |
-| 镜像名称 | 链接或文本 | 选手 Docker 镜像地址 |
-| 评审状态 | 文本 | 初始值为 `评测中` |
-| 得分 | 文本 | 系统自动写入 |
+| Team ID | Text | Unique identifier |
+| Team Name | Text | Display name |
+| Image Name | Link or Text | Contestant Docker image address |
+| Review Status | Text | Initial value `评测中` |
+| Score | Text | Automatically written by the system |
 
-### 8.3 编排器配置
+### 8.3 Orchestrator Configuration
 
-`eval_config/eval_orchestrator.yaml` 示例：
+`eval_config/eval_orchestrator.yaml` example:
 
 ```yaml
 feishu:
@@ -244,13 +244,13 @@ eval:
   results_dir: "logs/sim_eval_container"
 ```
 
-### 8.4 凭据配置
+### 8.4 Credential Configuration
 
 ```bash
 cp .env.example .env
 ```
 
-在 `.env` 中填写：
+Fill in `.env`:
 
 ```bash
 FEISHU_APP_ID=cli_xxxxxxxx
@@ -259,7 +259,7 @@ DOCKER_USERNAME=xxxx
 DOCKER_PASSWORD=xxxx
 ```
 
-### 8.5 手动运行
+### 8.5 Manual Execution
 
 ```bash
 source .env
@@ -267,17 +267,17 @@ export FEISHU_APP_ID FEISHU_APP_SECRET DOCKER_USERNAME DOCKER_PASSWORD
 PYTHONPATH=src python -m lerobot.scripts.ghrc_eval_orchestrator
 ```
 
-常用参数：
+Common parameters:
 
-| 参数 | 说明 |
+| Parameter | Description |
 | --- | --- |
-| `--keep-images` | 评测后保留选手镜像 |
-| `--skip-docker` | 跳过镜像拉取，适合本地调试 |
-| `--mock-eval` | 生成模拟分数，适合联调飞书回写 |
-| `--mock` | 完整模拟模式，不访问飞书和 Docker |
-| `-v` | 输出详细日志 |
+| `--keep-images` | Keep contestant images after evaluation |
+| `--skip-docker` | Skip image pull, suitable for local debugging |
+| `--mock-eval` | Generate mock scores, suitable for Feishu write-back integration testing |
+| `--mock` | Full mock mode, no Feishu or Docker access |
+| `-v` | Verbose logging |
 
-### 8.6 定时运行
+### 8.6 Scheduled Execution
 
 ```bash
 crontab -e
@@ -287,25 +287,25 @@ crontab -e
 */30 * * * * source /path/to/.env && cd /path/to/project && export FEISHU_APP_ID FEISHU_APP_SECRET DOCKER_USERNAME DOCKER_PASSWORD && PYTHONPATH=src python -m lerobot.scripts.ghrc_eval_orchestrator >> /var/log/eval_orchestrator.log 2>&1
 ```
 
-生产环境建议使用 `flock` 或调度平台锁机制，避免多个评测任务并发争抢 GPU。
+In production, use `flock` or a scheduler platform locking mechanism to avoid multiple evaluation tasks competing for the GPU.
 
-### 8.7 编排状态
+### 8.7 Orchestration Statuses
 
-| 状态 | 含义 |
+| Status | Meaning |
 | --- | --- |
-| `评测中` | 待评测，编排器会拾取该记录 |
-| `评测完成` | 评测成功，分数已回写 |
-| `评测失败` | 评测运行异常或超时 |
-| `镜像异常` | 镜像拉取、登录或格式异常 |
+| `评测中` | Pending evaluation; the orchestrator will pick up this record |
+| `评测完成` | Evaluation succeeded; score written back |
+| `评测失败` | Evaluation run exception or timeout |
+| `镜像异常` | Image pull, login, or format exception |
 
-已评测记录会自动跳过。需要重新评测时，将状态手动改回 `评测中`。
+Evaluated records are automatically skipped. To re-evaluate, manually change the status back to `评测中`.
 
-### 8.8 编排器故障排查
+### 8.8 Orchestrator Troubleshooting
 
-| 问题 | 检查项 |
+| Problem | What to Check |
 | --- | --- |
-| 飞书读写失败 | 权限是否开通并发布，应用是否已添加到表格 |
-| Docker 登录失败 | `.env` 凭据是否正确，registry 地址是否匹配 |
-| 镜像拉取超时 | 首次拉取大镜像可能需要 5 到 10 分钟，需确认网络和仓库限速 |
-| 定时任务未执行 | 检查 `crontab -l` 和 `/var/log/eval_orchestrator.log` |
-| 结果未回写 | 检查 `logs/sim_eval_container/` 是否生成 summary JSON |
+| Feishu read/write failure | Whether permissions are granted and published, whether the app is added to the table |
+| Docker login failure | Whether `.env` credentials are correct, whether the registry address matches |
+| Image pull timeout | First pull of a large image may take 5-10 minutes; check network and registry rate limits |
+| Scheduled task not executing | Check `crontab -l` and `/var/log/eval_orchestrator.log` |
+| Results not written back | Check whether summary JSON was generated under `logs/sim_eval_container/` |

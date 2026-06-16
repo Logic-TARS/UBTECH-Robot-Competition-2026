@@ -1,26 +1,26 @@
-# GHRC 自定义策略接入指南
+# GHRC Custom Policy Integration Guide
 
-本文面向参赛队伍，说明如何把自定义 policy 接入 GHRC infer 容器，并保证策略能被 `sim-eval` 容器稳定调用。
+This document is for contestant teams. It explains how to integrate a custom policy into the GHRC infer container and ensure the policy can be reliably invoked by the `sim-eval` container.
 
-上级评测流程见 [GHRC 评测系统使用指南](eval_guide.md)。如果策略来自另一个完整算法项目文件夹，请先阅读本文，再继续阅读 [外部算法项目迁移示例](external_algorithm_migration.md)。
+For the upstream evaluation workflow, see the [GHRC Evaluation System User Guide](eval_guide.md). If the policy comes from another complete algorithm project directory, read this document first, then continue with the [External Algorithm Migration Example](external_algorithm_migration.md).
 
 ---
 
-## 1. 接入方式总览
+## 1. Integration Methods Overview
 
-| 接入方式 | 适用情况 | 需要修改 |
+| Integration Method | Applicable Scenario | What to Modify |
 | --- | --- | --- |
-| LeRobot 默认 adapter | checkpoint 符合 LeRobot `from_pretrained` 和 `select_action` 接口 | `eval_config/eval_infer.yaml` |
-| 自定义 `PolicyAdapter` | 自定义 PyTorch、ONNX、TensorRT、RL、规划器或混合算法 | 新增 adapter 文件，并配置 `adapter_class` |
-| 外部项目迁移 | 原算法是一个完整项目目录，需要保留内部结构 | 新增项目目录和 `ghrc_adapter.py`，详见 [外部算法项目迁移示例](external_algorithm_migration.md) |
+| LeRobot default adapter | Checkpoint conforms to LeRobot `from_pretrained` and `select_action` interface | `eval_config/eval_infer.yaml` |
+| Custom `PolicyAdapter` | Custom PyTorch, ONNX, TensorRT, RL, planner, or hybrid algorithm | Add an adapter file and configure `adapter_class` |
+| External project migration | Original algorithm is a complete project directory; need to preserve its internal structure | Add project directory and `ghrc_adapter.py`; see [External Algorithm Migration Example](external_algorithm_migration.md) |
 
-正式评测中，选手应优先通过 YAML 和自定义 adapter 接入策略，不应修改通信协议、断言或评分逻辑。
+In the official evaluation, contestants should prioritize integrating policies via YAML and custom adapters. Communication protocols, assertions, and scoring logic must not be modified.
 
 ---
 
-## 2. LeRobot 默认 adapter
+## 2. LeRobot Default Adapter
 
-LeRobot 默认 adapter 适用于标准 LeRobot action policy。配置示例：
+The LeRobot default adapter is suitable for standard LeRobot action policies. Configuration example:
 
 ```yaml
 adapter_type: lerobot
@@ -35,7 +35,7 @@ task_policy_paths:
   task4: ../challenge2026_baseline/task4/act/pretrained_model
 ```
 
-加载链路：
+Loading chain:
 
 ```text
 eval_infer.yaml
@@ -46,32 +46,32 @@ eval_infer.yaml
       -> policy.select_action(observation_batch)
 ```
 
-### 2.1 支持边界
+### 2.1 Support Boundaries
 
-当前默认 adapter 并不等价于“支持所有 LeRobot policy”。直接可用需要同时满足以下条件：
+The current default adapter is not equivalent to "supports all LeRobot policies." Direct usability requires all of the following conditions to be met:
 
-| 条件 | 要求 |
+| Condition | Requirement |
 | --- | --- |
-| policy class | `policy_type` 能被 LeRobot `get_policy_class()` 找到 |
-| checkpoint | checkpoint 能被 `config_class.from_pretrained()` 和 `policy_cls.from_pretrained()` 加载 |
-| 推理接口 | policy 实现可用的 `select_action(batch)` |
-| observation | 当前评测 observation key 与 checkpoint 的输入 feature 匹配 |
-| action | 输出是一维动作向量，维度能被 sim 侧解码 |
+| policy class | `policy_type` must be discoverable by LeRobot `get_policy_class()` |
+| checkpoint | Checkpoint must be loadable by `config_class.from_pretrained()` and `policy_cls.from_pretrained()` |
+| inference interface | Policy must implement a working `select_action(batch)` |
+| observation | Current evaluation observation keys must match the checkpoint's input features |
+| action | Output must be a one-dimensional action vector decodable by the sim side |
 
-以下情况建议改用自定义 `PolicyAdapter`：
+Consider using a custom `PolicyAdapter` in the following cases:
 
-- policy 需要额外 tokenizer、processor、language token 或专用图像预处理。
-- policy 不是动作策略，例如 reward classifier。
-- policy 的输入 key、状态拼接方式、相机命名或 action 后处理与当前评测环境不一致。
-- 迁移的是非 LeRobot 框架、外部项目或自研推理引擎。
+- Policy requires additional tokenizer, processor, language tokens, or custom image preprocessing.
+- Policy is not an action policy, e.g., a reward classifier.
+- Policy's input keys, state concatenation method, camera naming, or action post-processing differs from the current evaluation environment.
+- Migrating a non-LeRobot framework, external project, or self-developed inference engine.
 
 ---
 
-## 3. 自定义 PolicyAdapter
+## 3. Custom PolicyAdapter
 
-自定义 adapter 是 GHRC 推荐的通用扩展方式。它负责把评测系统传入的 observation 转成选手模型输入，并返回一维 action。
+A custom adapter is the recommended general-purpose extension method for GHRC. It converts the observation passed by the evaluation system into the contestant model's input and returns a one-dimensional action.
 
-### 3.1 接口定义
+### 3.1 Interface Definition
 
 ```python
 from src.lerobot.sim_eval.policy_adapter import PolicyAdapter, InferenceContext, ResetContext
@@ -79,32 +79,32 @@ from src.lerobot.sim_eval.policy_adapter import PolicyAdapter, InferenceContext,
 
 class MyPolicyAdapter(PolicyAdapter):
     def load(self, model_path: str, device: str, config: dict) -> None:
-        """加载模型、权重、推理引擎和自定义配置。"""
+        """Load model, weights, inference engine, and custom configuration."""
         ...
 
     def predict(self, observation: dict, context: InferenceContext):
-        """根据当前 observation 返回一维 action。"""
+        """Return a one-dimensional action based on the current observation."""
         ...
 
     def reset(self, reset_context: ResetContext | None = None) -> None:
-        """episode 结束后清理跨步状态。"""
+        """Clear cross-step state after episode ends."""
         ...
 
     def close(self) -> None:
-        """释放模型、显存、文件句柄或推理引擎资源。"""
+        """Release model, GPU memory, file handles, or inference engine resources."""
         ...
 ```
 
-接口职责：
+Interface responsibilities:
 
-| 方法 | 调用时机 | 必要要求 |
+| Method | Invocation Timing | Required Behavior |
 | --- | --- | --- |
-| `load()` | infer 服务启动时调用一次 | 加载模型并进入推理模式，失败时抛出清晰异常 |
-| `predict()` | 每个仿真 step 调用 | 返回一维 `torch.Tensor`、`np.ndarray` 或 `list[float]` |
-| `reset()` | episode 结束或任务重置时调用 | 清理 RNN hidden state、action chunk、history buffer、planner 状态等 |
-| `close()` | infer 服务退出时调用 | 释放显存、文件句柄、TensorRT engine 等资源 |
+| `load()` | Called once at infer service startup | Load model and enter inference mode; raise a clear exception on failure |
+| `predict()` | Called at every simulation step | Return one-dimensional `torch.Tensor`, `np.ndarray`, or `list[float]` |
+| `reset()` | Called at episode end or task reset | Clear RNN hidden state, action chunk, history buffer, planner state, etc. |
+| `close()` | Called at infer service exit | Release GPU memory, file handles, TensorRT engine, etc. |
 
-### 3.2 YAML 配置
+### 3.2 YAML Configuration
 
 ```yaml
 adapter_type: lerobot
@@ -118,29 +118,29 @@ policy_type: null
 policy_path: /workspace/eval/my_team_policy/checkpoints/best.pt
 ```
 
-字段说明：
+Field descriptions:
 
-| 字段 | 是否必填 | 说明 |
+| Field | Required | Description |
 | --- | --- | --- |
-| `adapter_class` | 是 | 自定义 adapter 类路径，格式为 `module.path:ClassName` 或 `module.path.ClassName` |
-| `adapter_config` | 否 | 原样传入 `load(model_path, device, config)` 的自定义字典 |
-| `policy_path` | 视策略而定 | 权重路径或模型目录；自定义 adapter 可以按需使用 |
-| `policy_type` | 否 | 设置 `adapter_class` 后不走 LeRobot 默认加载逻辑，可设为 `null` |
+| `adapter_class` | Yes | Custom adapter class path in `module.path:ClassName` or `module.path.ClassName` format |
+| `adapter_config` | No | Custom dictionary passed as-is to `load(model_path, device, config)` |
+| `policy_path` | Depends on policy | Weight path or model directory; custom adapters may use as needed |
+| `policy_type` | No | Not used when `adapter_class` is set; can be `null` |
 
-`adapter_class` 指向的类必须继承 `PolicyAdapter`，否则 infer 启动会失败。
+The class pointed to by `adapter_class` must inherit from `PolicyAdapter`, or infer startup will fail.
 
 ---
 
-## 4. 最小示例：零动作 policy
+## 4. Minimal Example: Zero-Action Policy
 
-仓库提供了一个可直接运行的最小自定义 policy，用于验证配置、导入、WebSocket 通信和 action 解码链路：
+The repository provides a runnable minimal custom policy for verifying configuration, imports, WebSocket communication, and the action decoding pipeline:
 
-| 项目 | 路径 |
+| Item | Path |
 | --- | --- |
-| 示例代码 | `src/lerobot/sim_eval/zero_action_policy.py` |
-| 示例配置 | `eval_config/eval_infer_zero_action.yaml` |
+| Example code | `src/lerobot/sim_eval/zero_action_policy.py` |
+| Example config | `eval_config/eval_infer_zero_action.yaml` |
 
-核心逻辑：
+Core logic:
 
 ```python
 class ZeroActionPolicyAdapter(PolicyAdapter):
@@ -152,7 +152,7 @@ class ZeroActionPolicyAdapter(PolicyAdapter):
         return list(self._action)
 ```
 
-YAML：
+YAML:
 
 ```yaml
 adapter_class: src.lerobot.sim_eval.zero_action_policy:ZeroActionPolicyAdapter
@@ -162,7 +162,7 @@ policy_type: null
 policy_path: null
 ```
 
-infer 容器内运行：
+Run inside the infer container:
 
 ```bash
 python -m lerobot.scripts.ghrc_eval_infer \
@@ -170,34 +170,34 @@ python -m lerobot.scripts.ghrc_eval_infer \
   --task task4
 ```
 
-零动作策略通常不会完成任务。该示例只用于验证评测链路是否可以正常启动、连接和返回动作。
+A zero-action policy will generally not complete the task. This example is only for verifying that the evaluation pipeline can start, connect, and return actions correctly.
 
 ---
 
-## 5. 外部项目迁移入口
+## 5. External Project Migration Entry Point
 
-如果选手迁移的是另一个项目文件夹，例如自研 RL 项目、视觉语言模型项目或已有机器人算法仓库，推荐保留原项目目录结构，只新增一个 `ghrc_adapter.py` 作为 GHRC 接口层。
+If the contestant is migrating another project directory — for example, a self-developed RL project, vision-language model project, or existing robot algorithm repository — it is recommended to keep the original project directory structure and only add a `ghrc_adapter.py` as the GHRC interface layer.
 
-完整随机动作外部项目示例见 [外部算法项目迁移示例](external_algorithm_migration.md)：
+For a complete random-action external project example, see the [External Algorithm Migration Example](external_algorithm_migration.md):
 
-| 项目 | 路径 |
+| Item | Path |
 | --- | --- |
-| 示例项目 | `external_policy_examples/random_action_project/` |
-| 示例配置 | `eval_config/eval_infer_external_random.yaml` |
-| 迁移说明 | [external_algorithm_migration.md](external_algorithm_migration.md) |
+| Example project | `external_policy_examples/random_action_project/` |
+| Example config | `eval_config/eval_infer_external_random.yaml` |
+| Migration guide | [external_algorithm_migration.md](external_algorithm_migration.md) |
 
-该示例保留外部项目自己的 `external_algo/random_network.py`，并通过 `ghrc_adapter.py` 输出随机动作，用于验证以下内容：
+This example retains the external project's own `external_algo/random_network.py` and outputs random actions via `ghrc_adapter.py`, used to verify:
 
-- 外部项目目录可以被 Python import。
-- `adapter_class` 可以正确加载自定义 adapter。
-- `predict()` 返回的一维 action 可以被 sim 侧解码。
-- episode 结束时 `reset()` 可以被正常调用。
+- The external project directory can be Python-imported.
+- `adapter_class` can correctly load the custom adapter.
+- The one-dimensional action returned by `predict()` can be decoded by the sim side.
+- `reset()` can be normally invoked at episode end.
 
 ---
 
-## 6. Observation 格式
+## 6. Observation Format
 
-`predict()` 收到的 `observation` 是字典格式，常见 key 如下：
+The `observation` received by `predict()` is a dictionary with common keys as follows:
 
 ```python
 {
@@ -208,60 +208,60 @@ python -m lerobot.scripts.ghrc_eval_infer \
 }
 ```
 
-注意事项：
+Notes:
 
-- state 通常是一维机器人状态向量。
-- image 通常是 `torch.Tensor`，图像 key 以实际任务配置和仿真输出为准。
-- 自定义 adapter 应在 `predict()` 内完成选手模型所需的裁剪、归一化、resize、相机重命名和 batch 维度处理。
-- 不要假设所有 policy 的输入格式相同，尤其是需要 language token 或多模态 processor 的模型。
-
----
-
-## 7. Action 输出格式
-
-`predict()` 返回值支持以下类型：
-
-| 类型 | 处理方式 |
-| --- | --- |
-| `torch.Tensor` | 自动 `detach()`、转 float、转 CPU 并展平为一维 |
-| `np.ndarray` | 自动转为 `torch.Tensor` |
-| `list[float]` | 自动转为 `torch.Tensor` |
-
-action 要求：
-
-- 必须是一维动作向量。
-- 推荐输出 20 维 action。
-- `task4` 输出 18 维时，sim 侧会在右侧补 2 维夹爪控制量。
-- 不应返回 batch 维、字典、嵌套列表或未归一化到策略约定范围之外的值。
+- `state` is typically a one-dimensional robot state vector.
+- Images are typically `torch.Tensor`; actual image keys depend on the task configuration and simulation output.
+- Custom adapters should handle cropping, normalization, resizing, camera renaming, and batch dimension handling within `predict()`.
+- Do not assume all policies have the same input format, especially models requiring language tokens or multi-modal processors.
 
 ---
 
-## 8. 不允许修改范围
+## 7. Action Output Format
 
-正式评测提交中，不应为了适配策略修改以下内容：
+The `predict()` return value supports the following types:
 
-| 路径 | 原因 |
+| Type | Handling |
 | --- | --- |
-| `src/lerobot/sim_eval` 中的通信协议、断言、评分逻辑 | 影响评测一致性 |
-| `src/lerobot/scripts/ghrc_eval_sim.py` 的 action 解码和结果生成逻辑 | 影响仿真执行和评分结果 |
-| 任务评价阈值和成功条件 | 影响赛事公平性 |
+| `torch.Tensor` | Auto `detach()`, convert to float, move to CPU, and flatten to 1D |
+| `np.ndarray` | Auto-converted to `torch.Tensor` |
+| `list[float]` | Auto-converted to `torch.Tensor` |
 
-如确需扩展策略加载方式，应优先新增自定义 `PolicyAdapter`，或在选手项目目录中新增包装层。
+Action requirements:
+
+- Must be a one-dimensional action vector.
+- Recommended to output 20-dimensional actions.
+- For `task4`, outputting 18 dimensions is acceptable — the sim side will pad with 2 gripper control values on the right.
+- Do not return batch dimensions, dictionaries, nested lists, or values outside the policy's expected range.
 
 ---
 
-## 9. 接入检查清单
+## 8. Prohibited Modifications
 
-| 检查项 | 要求 |
+In official evaluation submissions, the following must not be modified for policy adaptation:
+
+| Path | Reason |
 | --- | --- |
-| 配置文件 | `eval_config/eval_infer.yaml` 或独立示例 YAML 可被 infer 读取 |
-| import | `python -c "from my_team_policy.ghrc_adapter import MyAdapter"` 能成功 |
-| 继承关系 | 自定义类继承 `PolicyAdapter` |
-| `load()` | 能加载模型、权重和配置，并进入 eval 推理模式 |
-| `predict()` | 输入任意合法 observation 时返回一维 action |
-| action 维度 | 推荐 20 维；task4 可 18 维 |
-| `reset()` | episode 结束后清理跨步状态 |
-| 依赖 | 额外 Python 包、系统库和权重文件已写入镜像或挂载路径 |
-| 日志 | 加载失败、权重缺失、维度错误时输出清晰错误 |
+| Communication protocol, assertions, and scoring logic in `src/lerobot/sim_eval` | Affects evaluation consistency |
+| Action decoding and result generation logic in `src/lerobot/scripts/ghrc_eval_sim.py` | Affects simulation execution and scoring results |
+| Task evaluation thresholds and success conditions | Affects competition fairness |
 
-完成上述检查后，再使用 [GHRC 评测系统使用指南](eval_guide.md) 中的本地评测流程启动完整评测。
+If policy loading needs to be extended, prioritize adding a custom `PolicyAdapter` or adding a wrapper layer in the contestant's project directory.
+
+---
+
+## 9. Integration Checklist
+
+| Check Item | Requirement |
+| --- | --- |
+| Config file | `eval_config/eval_infer.yaml` or standalone example YAML is readable by infer |
+| import | `python -c "from my_team_policy.ghrc_adapter import MyAdapter"` succeeds |
+| Inheritance | Custom class inherits from `PolicyAdapter` |
+| `load()` | Can load model, weights, and config, and enter eval inference mode |
+| `predict()` | Returns a one-dimensional action for any valid observation input |
+| Action dimension | Recommended 20 dims; 18 dims acceptable for task4 |
+| `reset()` | Clears cross-step state after episode ends |
+| Dependencies | Additional Python packages, system libraries, and weight files written into image or mounted path |
+| Logging | Clear errors on load failure, missing weights, or dimension mismatches |
+
+After completing the above checks, use the local evaluation workflow in the [GHRC Evaluation System User Guide](eval_guide.md) to start the full evaluation.

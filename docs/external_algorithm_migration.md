@@ -1,27 +1,27 @@
-# 外部算法项目迁移示例
+# External Algorithm Project Migration Example
 
-本文说明选手把非 LeRobot 项目迁移到 GHRC 评测仓库时，文件应如何放置、如何声明依赖、如何通过 `PolicyAdapter` 接入评测，以及如何用随机动作示例验证迁移链路。
+This document explains how to place files, declare dependencies, integrate via `PolicyAdapter`, and verify the migration pipeline with a random-action example when migrating a non-LeRobot project into the GHRC evaluation repository.
 
-自定义策略接口规范见 [GHRC 自定义策略接入指南](custom_policy.md)。完整评测运行流程见 [GHRC 评测系统使用指南](eval_guide.md)。
-
----
-
-## 1. 适用范围
-
-本文适用于以下场景：
-
-- 策略来自另一个完整 Python 项目目录。
-- 策略不是标准 LeRobot checkpoint，无法直接通过 `policy_type` + `policy_path` 加载。
-- 策略需要自定义图像预处理、状态拼接、规划器、外部推理引擎或专用依赖。
-- 策略最终仍能输出 GHRC 评测系统要求的一维 action。
-
-不建议把外部项目代码直接散落到 `src/lerobot` 内部。推荐保留项目原始目录结构，只新增一个轻量 GHRC adapter 作为边界层。
+For the custom policy interface specification, see the [GHRC Custom Policy Integration Guide](custom_policy.md). For the full evaluation workflow, see the [GHRC Evaluation System User Guide](eval_guide.md).
 
 ---
 
-## 2. 推荐目录结构
+## 1. Applicability
 
-把外部算法作为独立项目文件夹放在仓库根目录：
+This document applies to the following scenarios:
+
+- The policy comes from another complete Python project directory.
+- The policy is not a standard LeRobot checkpoint and cannot be directly loaded via `policy_type` + `policy_path`.
+- The policy requires custom image preprocessing, state stitching, a planner, an external inference engine, or specialized dependencies.
+- The policy can ultimately output the one-dimensional action required by the GHRC evaluation system.
+
+Do not scatter external project code inside `src/lerobot`. It is recommended to keep the project's original directory structure and only add a lightweight GHRC adapter as a boundary layer.
+
+---
+
+## 2. Recommended Directory Structure
+
+Place the external algorithm as an independent project folder at the repository root:
 
 ```text
 challengeBaseline_newFramework/
@@ -40,23 +40,23 @@ challengeBaseline_newFramework/
 └── src/lerobot/
 ```
 
-关键要求：
+Key requirements:
 
-| 项目    | 要求                                                                               |
-| ------- | ---------------------------------------------------------------------------------- |
-| import  | 项目目录必须能被 Python import                                                     |
-| 包结构  | 每级 Python 包目录建议包含 `__init__.py`                                         |
-| adapter | 新增 `ghrc_adapter.py`，只负责 GHRC 接口转换                                     |
-| 权重    | checkpoint 放在容器内可访问路径，并通过 `policy_path` 或 `adapter_config` 指定 |
-| 依赖    | 额外依赖写入 Dockerfile、requirements 或 pyproject 配置                            |
+| Item | Requirement |
+| --- | --- |
+| import | Project directory must be Python-importable |
+| Package structure | Each level of Python package directory should contain `__init__.py` |
+| adapter | Add `ghrc_adapter.py`, responsible only for GHRC interface conversion |
+| Weights | Checkpoint placed in a container-accessible path and specified via `policy_path` or `adapter_config` |
+| Dependencies | Additional dependencies written into Dockerfile, requirements, or pyproject config |
 
-如果项目目录放在仓库根目录，并从 `/workspace/eval` 启动，根目录通常已在 `sys.path` 中。若放在更深路径，需要在 Dockerfile 或启动脚本中设置 `PYTHONPATH`。
+If the project directory is placed at the repository root and launched from `/workspace/eval`, the root directory is typically already in `sys.path`. If placed in a deeper path, set `PYTHONPATH` in the Dockerfile or launch script.
 
 ---
 
-## 3. 仓库内随机动作示例
+## 3. In-Repo Random Action Example
 
-仓库提供了一个外部项目迁移示例，网络最终输出随机动作。该示例只用于验证目录结构、import、adapter 加载和 action 返回链路，不代表任务策略能力。
+The repository provides an external project migration example where the network outputs random actions. This example is only for verifying the directory structure, imports, adapter loading, and action return pipeline — it does not represent task policy capability.
 
 ```text
 challengeBaseline_newFramework/
@@ -71,19 +71,19 @@ challengeBaseline_newFramework/
     └── eval_infer_external_random.yaml
 ```
 
-示例文件：
+Example files:
 
-| 文件                                                                               | 说明                          |
-| ---------------------------------------------------------------------------------- | ----------------------------- |
-| `external_policy_examples/random_action_project/external_algo/random_network.py` | 模拟外部项目中的策略网络      |
-| `external_policy_examples/random_action_project/ghrc_adapter.py`                 | GHRC `PolicyAdapter` 包装层 |
-| `eval_config/eval_infer_external_random.yaml`                                    | infer 配置示例                |
+| File | Description |
+| --- | --- |
+| `external_policy_examples/random_action_project/external_algo/random_network.py` | Simulates a policy network inside an external project |
+| `external_policy_examples/random_action_project/ghrc_adapter.py` | GHRC `PolicyAdapter` wrapper layer |
+| `eval_config/eval_infer_external_random.yaml` | infer configuration example |
 
 ---
 
-## 4. 外部网络示例
+## 4. External Network Example
 
-`random_network.py` 模拟一个外部项目内部的策略对象：
+`random_network.py` simulates a policy object inside an external project:
 
 ```python
 class RandomActionNetwork:
@@ -94,13 +94,13 @@ class RandomActionNetwork:
         ]
 ```
 
-真实迁移时，选手可以把这里替换为自己的模型加载、图像预处理、状态编码、规划器或推理引擎。外部项目内部代码不需要知道 GHRC WebSocket 协议，只需要由 adapter 调用并返回 action。
+When migrating a real project, replace this with your own model loading, image preprocessing, state encoding, planner, or inference engine. Code inside the external project does not need to know about the GHRC WebSocket protocol — it only needs to be called by the adapter and return actions.
 
 ---
 
-## 5. GHRC Adapter 示例
+## 5. GHRC Adapter Example
 
-`ghrc_adapter.py` 负责把 GHRC observation 转成外部项目输入，并把外部项目输出转成 GHRC action：
+`ghrc_adapter.py` converts GHRC observations into external project inputs and external project outputs into GHRC actions:
 
 ```python
 from src.lerobot.sim_eval.policy_adapter import PolicyAdapter
@@ -126,20 +126,20 @@ class ExternalRandomPolicyAdapter(PolicyAdapter):
         self.network = None
 ```
 
-迁移真实项目时，adapter 中通常需要完成：
+When migrating a real project, the adapter typically needs to handle:
 
-| 方法          | 迁移职责                                                                             |
-| ------------- | ------------------------------------------------------------------------------------ |
-| `load()`    | 读取 `policy_path` 和 `adapter_config`，加载 checkpoint、初始化模型、设置 device |
-| `predict()` | 将 GHRC observation 转成外部算法输入，调用模型或规划器，返回一维 action              |
-| `reset()`   | 清理 RNN hidden state、action chunk、history buffer、planner 状态等跨 episode 状态   |
-| `close()`   | 释放 GPU 显存、文件句柄、推理引擎等资源                                              |
+| Method | Migration Responsibility |
+| --- | --- |
+| `load()` | Read `policy_path` and `adapter_config`, load checkpoint, initialize model, set device |
+| `predict()` | Convert GHRC observation to external algorithm input, invoke model or planner, return one-dimensional action |
+| `reset()` | Clear cross-episode state such as RNN hidden state, action chunk, history buffer, planner state |
+| `close()` | Release GPU memory, file handles, inference engine resources |
 
 ---
 
-## 6. YAML 配置
+## 6. YAML Configuration
 
-随机动作示例配置：
+Random action example configuration:
 
 ```yaml
 adapter_class: external_policy_examples.random_action_project.ghrc_adapter:ExternalRandomPolicyAdapter
@@ -152,7 +152,7 @@ policy_type: null
 policy_path: null
 ```
 
-真实项目配置示例：
+Real project configuration example:
 
 ```yaml
 adapter_class: my_team_policy.ghrc_adapter:MyAdapter
@@ -164,34 +164,34 @@ policy_type: null
 policy_path: /workspace/eval/my_team_policy/checkpoints/best.pt
 ```
 
-字段说明：
+Field descriptions:
 
-| 字段               | 说明                                                                     |
-| ------------------ | ------------------------------------------------------------------------ |
-| `adapter_class`  | `模块路径:类名`，由 `ghrc_eval_infer.py` 使用 `importlib` 动态导入 |
-| `adapter_config` | 自定义参数字典，会传入 `adapter.load(model_path, device, config)`      |
-| `policy_type`    | 设置 `adapter_class` 后可为 `null`，不会走 LeRobot 默认 adapter      |
-| `policy_path`    | 真实模型权重路径；如果模型不需要权重，可设为 `null`                    |
+| Field | Description |
+| --- | --- |
+| `adapter_class` | `module.path:ClassName`, dynamically imported by `ghrc_eval_infer.py` using `importlib` |
+| `adapter_config` | Custom parameter dictionary passed to `adapter.load(model_path, device, config)` |
+| `policy_type` | Can be `null` when `adapter_class` is set; will not use the LeRobot default adapter |
+| `policy_path` | Real model weight path; can be `null` if no weights are needed |
 
 ---
 
-## 7. 运行验证
+## 7. Running Verification
 
-### 7.1 验证 Python import
+### 7.1 Verify Python import
 
-在仓库根目录或 infer 容器内执行：
+Run at the repository root or inside the infer container:
 
 ```bash
 python -c "from external_policy_examples.random_action_project.ghrc_adapter import ExternalRandomPolicyAdapter; print(ExternalRandomPolicyAdapter)"
 ```
 
-真实项目替换为自己的 adapter：
+For real projects, substitute your own adapter:
 
 ```bash
 python -c "from my_team_policy.ghrc_adapter import MyAdapter; print(MyAdapter)"
 ```
 
-### 7.2 启动 infer
+### 7.2 Start infer
 
 ```bash
 python -m lerobot.scripts.ghrc_eval_infer \
@@ -199,7 +199,7 @@ python -m lerobot.scripts.ghrc_eval_infer \
   --task task4
 ```
 
-### 7.3 启动 sim-eval
+### 7.3 Start sim-eval
 
 ```bash
 python -m lerobot.scripts.ghrc_eval_sim \
@@ -207,37 +207,37 @@ python -m lerobot.scripts.ghrc_eval_sim \
   --task task4
 ```
 
-随机动作策略通常不会完成任务，失败或超时是预期结果。该示例的目标是验证：
+A random-action policy will generally not complete the task; failure or timeout is expected. The goal of this example is to verify:
 
-- 外部项目目录可被 import。
-- `adapter_class` 可被 infer 动态加载。
-- `predict()` 返回的一维 action 可被 sim 侧解码。
-- episode 结束时 `reset()` 可被调用。
-
----
-
-## 8. 依赖和镜像要求
-
-外部项目若有额外依赖，必须随选手镜像一起交付。
-
-| 类型            | 处理方式                                            |
-| --------------- | --------------------------------------------------- |
-| Python 依赖     | 写入 Dockerfile、requirements.txt 或 pyproject.toml |
-| 系统库          | 写入 Dockerfile，避免运行时手动安装                 |
-| 大模型权重      | 放入镜像、挂载目录或赛事允许的模型路径              |
-| 环境变量        | 在启动脚本或容器配置中显式声明                      |
-| CUDA / TensorRT | 确认与评测基础镜像版本兼容                          |
-
-正式提交前，建议在与赛事评测一致的镜像中完成一次 `import -> infer 启动 -> sim 连接 -> episode reset` 的完整链路验证。
+- The external project directory can be imported.
+- `adapter_class` can be dynamically loaded by infer.
+- The one-dimensional action returned by `predict()` can be decoded by the sim side.
+- `reset()` can be invoked at episode end.
 
 ---
 
-## 9. 不允许修改范围
+## 8. Dependency and Image Requirements
 
-外部项目迁移时，不应为了适配算法修改以下内容：
+If the external project has additional dependencies, they must be delivered together with the contestant image.
 
-| 路径或逻辑                                                                      | 原因                   |
-| ------------------------------------------------------------------------------- | ---------------------- |
-| `src/lerobot/sim_eval` 中的通信、断言和评分逻辑                               | 影响评测一致性和公平性 |
-| `src/lerobot/scripts/ghrc_eval_sim.py` 的 action 解码、episode 执行和结果生成 | 影响仿真行为和分数     |
-| 任务评价阈值和成功条件                                                          | 影响赛事统一标准       |
+| Type | Handling |
+| --- | --- |
+| Python dependencies | Write into Dockerfile, requirements.txt, or pyproject.toml |
+| System libraries | Write into Dockerfile; avoid installing at runtime |
+| Large model weights | Place in image, mounted directory, or contest-sanctioned model path |
+| Environment variables | Explicitly declare in launch script or container configuration |
+| CUDA / TensorRT | Confirm compatibility with the evaluation base image version |
+
+Before formal submission, it is recommended to complete a full `import -> infer startup -> sim connection -> episode reset` pipeline verification in an image consistent with the contest evaluation environment.
+
+---
+
+## 9. Prohibited Modifications
+
+When migrating an external project, the following must not be modified for algorithm adaptation:
+
+| Path or Logic | Reason |
+| --- | --- |
+| Communication, assertion, and scoring logic in `src/lerobot/sim_eval` | Affects evaluation consistency and fairness |
+| Action decoding, episode execution, and result generation in `src/lerobot/scripts/ghrc_eval_sim.py` | Affects simulation behavior and scores |
+| Task evaluation thresholds and success conditions | Affects unified contest standards |

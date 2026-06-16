@@ -76,3 +76,4 @@ For official evaluation deployment, custom policy integration, and external algo
 | [Evaluation System Guide](docs/eval_guide.md) | Dual-container evaluation workflow, configuration, task policy paths, troubleshooting, and orchestration. |
 | [Custom Policy Integration](docs/custom_policy.md) | LeRobot policy loading boundaries, custom `PolicyAdapter` interface, zero-action example, and action/observation contract. |
 | [External Algorithm Migration](docs/external_algorithm_migration.md) | Recommended file layout for migrating an existing algorithm project and wrapping it with `ghrc_adapter.py`. |
+| [Contestant Submission Specification](docs/submission_guidelines.md) | Submission specification, interface definitions, data dimension standards, and packaging instructions. |

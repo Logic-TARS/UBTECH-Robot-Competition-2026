@@ -73,6 +73,7 @@
 
 | 文档 | 说明 |
 | --- | --- |
-| [评测系统使用指南](docs/eval_guide.md) | 双容器评测流程、配置说明、多任务 policy 路径、故障排查和自动化编排。 |
-| [自定义策略接入指南](docs/custom_policy.md) | LeRobot policy 加载边界、自定义 `PolicyAdapter` 接口、零动作示例和 action/observation 规范。 |
-| [外部算法项目迁移示例](docs/external_algorithm_migration.md) | 将已有算法项目文件夹迁移到评测仓库，并通过 `ghrc_adapter.py` 包装接入。 |
+| [评测系统使用指南](docs/eval_guide_zh.md) | 双容器评测流程、配置说明、多任务 policy 路径、故障排查和自动化编排。 |
+| [自定义策略接入指南](docs/custom_policy_zh.md) | LeRobot policy 加载边界、自定义 `PolicyAdapter` 接口、零动作示例和 action/observation 规范。 |
+| [外部算法项目迁移示例](docs/external_algorithm_migration_zh.md) | 将已有算法项目文件夹迁移到评测仓库，并通过 `ghrc_adapter.py` 包装接入。 |
+| [参赛选手作品提交规范](docs/选手提交作品规范.md) | 选手提交规范、接口定义、数据维度规范和打包提交说明。 |
