@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import requests
@@ -101,11 +101,15 @@ class EvalScore:
         score: 得分（0-100）。
         status: 评测结果状态。
         detail: 详细描述（失败原因、各任务细项等，写入飞书备注或单独列）。
+        task_average_scores: 每个任务的 episode 平均分。
+        episode_scores: 按任务保存的每个 episode 分数。
     """
 
     score: float = 0.0
     status: str = STATUS_DONE
     detail: str = ""
+    task_average_scores: dict[str, float] = field(default_factory=dict)
+    episode_scores: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 @dataclass

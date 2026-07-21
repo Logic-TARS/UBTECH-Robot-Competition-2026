@@ -8,7 +8,7 @@
 评测编排器 (ghrc_eval_orchestrator.py)
   ├─ 读取飞书/本地选手镜像信息，拉取镜像
   ├─ 调用 run_eval.sh，按 task 列表启动一次双容器评测
-  └─ 读取各 task 的 summary_*.json，以「任务成功率的算术平均」写回最终 0–100 分
+  └─ 读取各 task 的 summary_*.json，以「各任务 episode 平均分的等权平均」写回最终 0–100 分
 
 sim-eval 容器 (ghrc_eval_sim.py)                  infer 容器 (ghrc_eval_infer.py)
   Isaac Sim / WalkerS2sim                           PolicyAdapter / 选手策略
@@ -45,6 +45,8 @@ sim-eval 容器 (ghrc_eval_sim.py)                  infer 容器 (ghrc_eval_infe
 sim 写入 `log_dir`（默认配置解析后为 `logs/sim_eval_container`）：
 
 - `episode_0000.json`：`status`、步数、当前结束分数、reason 与完整 `metrics`。
-- `summary_YYYYMMDD_HHMMSS.json`：各 episode 详情、成功/失败/异常数和 `success_rate`。
+- `summary_YYYYMMDD_HHMMSS.json`：各 episode 分数与详情、`total_score`、`average_score`、成功/失败/异常数和 `success_rate`。
 
-编排器只读取 `summary` 的 `success_rate`，每个任务转换为百分比，再对存在结果的任务做无权算术平均。也就是说，飞书中的最终成绩是**任务完成率平均**，不是四项任务 `episode.score` 的平均；episode 内的 0–100 分主要用于记录、调试和成功判定。
+编排器从每个 summary 的 `episode_scores_with_reason` 重新计算该任务的 episode 平均分，再对配置中的全部任务做等权算术平均。成功率仍保留用于诊断，但不再参与最终成绩。任一配置任务缺少有效 episode 分数时，本轮结果标记为评测失败。
+
+编排器结果对象同时保留 `task_average_scores` 和按任务分组的 `episode_scores`；mock/本地模式写出的 `result_*.json` 还会显式包含最终 `average_score`。生产模式向飞书“得分”列写入的也是该最终平均分。

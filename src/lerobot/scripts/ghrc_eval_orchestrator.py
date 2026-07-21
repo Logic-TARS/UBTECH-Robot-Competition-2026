@@ -31,6 +31,7 @@ import argparse
 import concurrent.futures
 import json
 import logging
+import math
 import os
 import random
 import shutil
@@ -225,6 +226,17 @@ def _run_mock_eval(results_dir: Path) -> None:
         num_episodes = random.randint(3, 10)
         success_count = int(num_episodes * success_rate)
         failed_count = num_episodes - success_count
+        episode_scores = [
+            {
+                "episode_id": ep,
+                "score": random.randint(40, 100),
+                "reason": "mock_success" if ep < success_count else "mock_terminal",
+                "status": "success" if ep < success_count else "failed",
+            }
+            for ep in range(num_episodes)
+        ]
+        total_score = sum(int(item["score"]) for item in episode_scores)
+        average_score = total_score / num_episodes if num_episodes > 0 else 0.0
 
         summary = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(timestamp_base + idx)),
@@ -239,17 +251,11 @@ def _run_mock_eval(results_dir: Path) -> None:
             "error_count": 0,
             "total_steps": num_episodes * random.randint(100, 400),
             "total_duration_seconds": num_episodes * random.uniform(30, 120),
+            "total_score": total_score,
+            "average_score": average_score,
             "success_rate": success_rate,
             "details": [],
-            "episode_scores_with_reason": [
-                {
-                    "episode_id": ep,
-                    "score": random.randint(40, 100),
-                    "reason": "mock_success" if ep < success_count else "mock_terminal",
-                    "status": "success" if ep < success_count else "failed",
-                }
-                for ep in range(num_episodes)
-            ],
+            "episode_scores_with_reason": episode_scores,
         }
 
         with open(summary_file, "w", encoding="utf-8") as f:
@@ -572,15 +578,14 @@ class EvalOrchestrator:
     def _collect_scores(self) -> EvalScore:
         """从 summary JSON 中提取分数。
 
-        汇总逻辑：取各任务成功率的加权平均作为最终得分（0-100）。
-        同时记录各任务详情到 detail 字段。
+        汇总逻辑：先从每个任务的 episode score 计算任务平均分，再对任务
+        平均分做等权算术平均，得到最终得分（0-100）。成功率只用于展示。
         """
         summary_files = sorted(self.results_dir.glob("summary_*.json"))
         if not summary_files:
             return EvalScore(status=STATUS_FAILED, detail="未找到评测结果文件")
 
-        per_task: dict[str, float] = {}
-        details_parts: list[str] = []
+        per_task: dict[str, dict[str, Any]] = {}
 
         for filepath in summary_files:
             try:
@@ -591,26 +596,128 @@ class EvalOrchestrator:
                 continue
 
             task_name = str(data.get("task_name", "")).lower()
+            if not task_name:
+                logger.warning("summary 缺少 task_name：%s", filepath.name)
+                continue
+            if task_name not in self.tasks:
+                logger.warning("忽略未配置任务的 summary：%s (%s)", filepath.name, task_name)
+                continue
+
             success_rate = float(data.get("success_rate", 0))
             success_count = int(data.get("success_count", 0))
             num_episodes = int(data.get("num_episodes", 1))
 
-            per_task[task_name] = success_rate * 100.0
-            details_parts.append(
-                f"{task_name}: {success_count}/{num_episodes} ({success_rate*100:.1f}%)"
+            episode_items = data.get("episode_scores_with_reason")
+            if not isinstance(episode_items, list):
+                episode_items = data.get("details")
+            if not isinstance(episode_items, list):
+                logger.warning("summary 缺少 episode score 列表：%s", filepath.name)
+                continue
+
+            episode_scores: list[tuple[int, float]] = []
+            for item in episode_items:
+                if not isinstance(item, dict) or "score" not in item:
+                    continue
+                try:
+                    episode_id = int(item.get("episode_id", len(episode_scores)))
+                    episode_score = float(item["score"])
+                except (TypeError, ValueError):
+                    logger.warning("忽略无效 episode score：%s", item)
+                    continue
+                if not math.isfinite(episode_score) or not 0.0 <= episode_score <= 100.0:
+                    logger.warning("忽略超出 0-100 范围的 episode score：%s", item)
+                    continue
+                episode_scores.append((episode_id, episode_score))
+
+            if not episode_scores:
+                logger.warning("summary 中没有有效 episode score：%s", filepath.name)
+                continue
+            if len({episode_id for episode_id, _ in episode_scores}) != len(episode_scores):
+                logger.warning("summary 存在重复 episode_id：%s", filepath.name)
+                continue
+            if len(episode_scores) != num_episodes:
+                logger.warning(
+                    "summary 的 episode score 数量不完整：%s expected=%s actual=%s",
+                    filepath.name,
+                    num_episodes,
+                    len(episode_scores),
+                )
+                continue
+            episode_scores.sort(key=lambda item: item[0])
+
+            calculated_average = sum(score for _, score in episode_scores) / len(episode_scores)
+            declared_average = data.get("average_score")
+            if declared_average is not None:
+                try:
+                    if abs(float(declared_average) - calculated_average) > 1e-6:
+                        logger.warning(
+                            "%s average_score 与 episode 列表不一致：declared=%.4f calculated=%.4f",
+                            filepath.name,
+                            float(declared_average),
+                            calculated_average,
+                        )
+                except (TypeError, ValueError):
+                    logger.warning("%s average_score 无效，将按 episode 重新计算", filepath.name)
+
+            per_task[task_name] = {
+                "average_score": calculated_average,
+                "episode_scores": episode_scores,
+                "success_rate": success_rate,
+                "success_count": success_count,
+                "num_episodes": num_episodes,
+            }
+            logger.info(
+                "  %s: average_score=%.2f episodes=%s success=%s/%s (%.1f%%)",
+                task_name,
+                calculated_average,
+                episode_scores,
+                success_count,
+                num_episodes,
+                success_rate * 100,
             )
-            logger.info("  %s: rate=%.1f%% (%s/%s)", task_name, success_rate * 100, success_count, num_episodes)
 
         if not per_task:
             return EvalScore(status=STATUS_FAILED, detail="所有 summary 文件解析失败")
 
-        # 总分 = 各任务加权平均
-        overall = round(sum(per_task.values()) / len(per_task), 1)
+        missing_tasks = [task for task in self.tasks if task not in per_task]
+        if missing_tasks:
+            return EvalScore(
+                status=STATUS_FAILED,
+                detail=f"缺少任务评分结果：{', '.join(missing_tasks)}",
+            )
+
+        # 每个任务等权；任务内部先对所有 episode score 取平均。
+        overall = round(
+            sum(float(item["average_score"]) for item in per_task.values()) / len(per_task),
+            2,
+        )
+        details_parts: list[str] = []
+        for task_name in self.tasks:
+            task_result = per_task[task_name]
+            score_text = ",".join(
+                f"ep{episode_id}={score:g}"
+                for episode_id, score in task_result["episode_scores"]
+            )
+            details_parts.append(
+                f"{task_name}: avg={task_result['average_score']:.2f} "
+                f"[{score_text}] success={task_result['success_count']}/{task_result['num_episodes']}"
+            )
 
         return EvalScore(
             score=overall,
             status=STATUS_DONE,
             detail=" | ".join(details_parts),
+            task_average_scores={
+                task_name: float(per_task[task_name]["average_score"])
+                for task_name in self.tasks
+            },
+            episode_scores={
+                task_name: [
+                    {"episode_id": episode_id, "score": score}
+                    for episode_id, score in per_task[task_name]["episode_scores"]
+                ]
+                for task_name in self.tasks
+            },
         )
 
     # ------------------------------------------------------------------
@@ -672,6 +779,9 @@ class EvalOrchestrator:
                 "team_id": competitor.team_id,
                 "image_name": competitor.image_name,
                 "score": score.score,
+                "average_score": score.score,
+                "task_average_scores": score.task_average_scores,
+                "episode_scores": score.episode_scores,
                 "status": score.status,
                 "detail": score.detail,
                 "evaluated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),

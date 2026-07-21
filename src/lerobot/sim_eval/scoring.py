@@ -761,14 +761,14 @@ def task4_check_long_edge_close_score(
 
 def task4_time_score(
     elapsed_seconds: float,
-    full_score: int = 10,
+    full_score: int = 40,
     full_time_seconds: float = 180.0,
     penalty_interval_seconds: float = 30.0,
     penalty_per_interval: int = 5,
 ) -> int:
-    """Task4 时间评分（官方标准，满分 10）。
+    """Task4 时间评分（官方标准，满分 40）。
 
-    180 秒内完成得满分，每超 30 秒扣 5 分，最低 0 分。
+    180 秒内完成得 40 分，每超 30 秒扣 5 分，扣完为止。
     """
     return int(calculate_time_score(
         elapsed_seconds=elapsed_seconds,

@@ -1,12 +1,10 @@
+import json
 import logging
 from datetime import datetime
-from typing import Any
-import numpy as np
-import torch
-from .common import _make_json_safe
-
 from pathlib import Path
-import json
+from typing import Any
+
+from .common import _make_json_safe
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +82,7 @@ class InferenceSummary:
         self.error_count = 0
         self.total_steps = 0
         self.total_duration_seconds = 0.0
+        self.total_score = 0
         self.details: list[dict] = []
 
     def add_result(self, result: EpisodeResult) -> None:
@@ -95,11 +94,18 @@ class InferenceSummary:
             self.error_count += 1
         self.total_steps += result.steps
         self.total_duration_seconds += result.duration_seconds
+        self.total_score += int(result.score)
         self.details.append(result.to_dict())
 
     @property
     def success_rate(self) -> float:
         return self.success_count / self.num_episodes if self.num_episodes > 0 else 0.0
+
+    @property
+    def average_score(self) -> float:
+        """返回所有已完成 episode 的算术平均分。"""
+
+        return self.total_score / len(self.details) if self.details else 0.0
 
     def to_dict(self) -> dict:
         episode_scores_with_reason: list[dict[str, Any]] = []
@@ -124,6 +130,8 @@ class InferenceSummary:
             "error_count": self.error_count,
             "total_steps": self.total_steps,
             "total_duration_seconds": self.total_duration_seconds,
+            "total_score": self.total_score,
+            "average_score": self.average_score,
             "success_rate": self.success_rate,
             "details": self.details,
             "episode_scores_with_reason": episode_scores_with_reason,
@@ -160,6 +168,7 @@ def print_summary(summary: InferenceSummary) -> None:
     print(f"  总 episodes: {summary.num_episodes}  |  最大步数：{summary.max_steps}")
     print(f"  成功：{summary.success_count}  失败：{summary.failed_count}  异常：{summary.error_count}")
     print(f"  成功率    : {summary.success_rate * 100:.2f}%")
+    print(f"  Episode 总分: {summary.total_score}  |  平均分：{summary.average_score:.2f}")
     if summary.num_episodes > 0:
         print(f"  平均步数  : {summary.total_steps / summary.num_episodes:.1f}")
         print(f"  平均耗时  : {summary.total_duration_seconds / summary.num_episodes:.2f} s")
