@@ -1,0 +1,2 @@
+318c72a322917d57a2052d84fb2b1a1130cd887d Add host launcher script for walker_s2 teleoperation via Docker
+b057d0d5c63b21deb7fded714932fa7e3894fe82 新增传送带速度调整接口，同时修复任务二初始化见不到工件的bug

@@ -1,0 +1,60 @@
+From 318c72a322917d57a2052d84fb2b1a1130cd887d Mon Sep 17 00:00:00 2001
+From: Challenge2026 Dev <dev@challenge2026.local>
+Date: Mon, 20 Apr 2026 14:12:51 +0800
+Subject: [PATCH] Add host launcher script for walker_s2 teleoperation via
+ Docker
+
+---
+ run_walker_s2_teleop.sh | 40 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 40 insertions(+)
+ create mode 100755 run_walker_s2_teleop.sh
+
+diff --git a/run_walker_s2_teleop.sh b/run_walker_s2_teleop.sh
+new file mode 100755
+index 00000000..02fb0e8d
+--- /dev/null
++++ b/run_walker_s2_teleop.sh
+@@ -0,0 +1,40 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++CONTAINER_NAME="${CONTAINER_NAME:-isaac_sim_ubt}"
++CONTAINER_WORKDIR="${CONTAINER_WORKDIR:-/workspace/GlobalHumanoidRobotChallenge2026_Baseline}"
++
++if ! command -v docker >/dev/null 2>&1; then
++  echo "Error: docker command not found on host."
++  exit 1
++fi
++
++if ! docker ps -a --format '{{.Names}}' | grep -Fxq "${CONTAINER_NAME}"; then
++  echo "Error: container '${CONTAINER_NAME}' does not exist."
++  exit 1
++fi
++
++if ! docker ps --format '{{.Names}}' | grep -Fxq "${CONTAINER_NAME}"; then
++  echo "Starting container '${CONTAINER_NAME}'..."
++  docker start "${CONTAINER_NAME}" >/dev/null
++fi
++
++TTY_FLAG="-i"
++if [[ -t 0 && -t 1 ]]; then
++  TTY_FLAG="-it"
++fi
++
++docker exec ${TTY_FLAG} -w "${CONTAINER_WORKDIR}" "${CONTAINER_NAME}" \
++  /isaac-sim/python.sh lerobot/scripts/control_robot.py \
++    --robot.type=walker_s2_sim \
++    --control.type=teleoperate \
++    --control.task=Conveyor_Sorting \
++    --control.fps=30 \
++    --control.display_cameras=true \
++    --control.teleop_time_s=100000000
++
++# Available values for --control.task (4 total):
++# 1) Part_Sorting
++# 2) Conveyor_Sorting
++# 3) Foam_Inlaying
++# 4) Packing_Box
+-- 
+2.34.1
+

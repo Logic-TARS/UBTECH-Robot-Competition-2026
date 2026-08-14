@@ -1,0 +1,153 @@
+From b057d0d5c63b21deb7fded714932fa7e3894fe82 Mon Sep 17 00:00:00 2001
+From: Vincent <2369079685@qq.com>
+Date: Fri, 17 Apr 2026 07:15:06 -0400
+Subject: [PATCH] =?UTF-8?q?=E6=96=B0=E5=A2=9E=E4=BC=A0=E9=80=81=E5=B8=A6?=
+ =?UTF-8?q?=E9=80=9F=E5=BA=A6=E8=B0=83=E6=95=B4=E6=8E=A5=E5=8F=A3=EF=BC=8C?=
+ =?UTF-8?q?=E5=90=8C=E6=97=B6=E4=BF=AE=E5=A4=8D=E4=BB=BB=E5=8A=A1=E4=BA=8C?=
+ =?UTF-8?q?=E5=88=9D=E5=A7=8B=E5=8C=96=E8=A7=81=E4=B8=8D=E5=88=B0=E5=B7=A5?=
+ =?UTF-8?q?=E4=BB=B6=E7=9A=84bug?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ README.md                                     |  0
+ README_zh.md                                  |  0
+ Ubtech_sim/config/Conveyor_Sorting.yaml       |  2 +
+ Ubtech_sim/source/SceneBuilder.py             | 55 ++++++++++---------
+ .../robots/head_stereo_visualizer.py          |  0
+ 5 files changed, 32 insertions(+), 25 deletions(-)
+ mode change 100644 => 100755 README.md
+ mode change 100644 => 100755 README_zh.md
+ mode change 100644 => 100755 lerobot/common/robot_devices/robots/head_stereo_visualizer.py
+
+diff --git a/README.md b/README.md
+old mode 100644
+new mode 100755
+diff --git a/README_zh.md b/README_zh.md
+old mode 100644
+new mode 100755
+diff --git a/Ubtech_sim/config/Conveyor_Sorting.yaml b/Ubtech_sim/config/Conveyor_Sorting.yaml
+index 51ce0a31..e176ad91 100755
+--- a/Ubtech_sim/config/Conveyor_Sorting.yaml
++++ b/Ubtech_sim/config/Conveyor_Sorting.yaml
+@@ -26,6 +26,8 @@ ConveyorBelt:
+   - [-0.13357845206723284, 0.26859, 0.0]
+   ConveyorBelt_scale: 
+   - [1.0, 1.0, 1.0]
++  ConveyorBelt_speed:
++  - [0.0285, 0.0, 0.0]
+ 
+ table:
+   table_usd: 'Collected_table_v2/table_v2.usd'
+diff --git a/Ubtech_sim/source/SceneBuilder.py b/Ubtech_sim/source/SceneBuilder.py
+index 95ed598c..328a38a9 100755
+--- a/Ubtech_sim/source/SceneBuilder.py
++++ b/Ubtech_sim/source/SceneBuilder.py
+@@ -70,6 +70,11 @@ class SceneBuilder:
+         )
+         # 保存传送带初始位置，用于重置
+         self._conveyor_initial_position = self.ConveyorBelt_cfg['ConveyorBelt_position']
++
++        #设置传送带初始速度
++        Conveyor_speed=self.ConveyorBelt_cfg['ConveyorBelt_speed']
++        self.set_conveyor_speed(Conveyor_speed)
++
+         return self.ConveyorBelt
+ 
+     def build_parts(self):
+@@ -81,7 +86,7 @@ class SceneBuilder:
+             self.planes.append(rep.create.plane(
+                 position=self.plane_cfg['plane_position'][i],
+                 scale=self.plane_cfg['plane_scale'][i],
+-                visible=False,
++                visible=True,
+             ))
+ 
+         part_usds = [self._usd_path(v) for k, v in self.part_cfg.items()
+@@ -165,7 +170,7 @@ class SceneBuilder:
+             for template_path in ['/Root/Part_A_Template', '/Root/Part_B_Template']:
+                 prim = stage.GetPrimAtPath(template_path)
+                 if prim.IsValid():
+-                    UsdGeom.Imageable(prim).MakeInvisible()
++                    # UsdGeom.Imageable(prim).MakeInvisible()
+                     xformable = UsdGeom.Xformable(prim)
+                     xformable.ClearXformOpOrder()
+                     xformable.AddTranslateOp().Set(Gf.Vec3d(0, 0, -100))
+@@ -1068,10 +1073,27 @@ class SceneBuilder:
+             # 全局异常捕获，保证函数健壮性
+             print(f"[save_parts_poses] 保存失败：{str(e)}")
+             return None
++           # 传送带表面速度：Isaac Sim 5.1 / PhysX 107 使用 PhysxSurfaceVelocityAPI（Vector3f）。
++    #设置传送带表面速度
++    def set_conveyor_speed(self,speed):
++        def _set_conveyor_surface_velocity(velocity_vec3)-> None:
++            import omni.usd
++            from pxr import PhysxSchema
++            stage = omni.usd.get_context().get_stage()
++            for prim in stage.Traverse():
++                if prim.HasAPI(PhysxSchema.PhysxSurfaceVelocityAPI):
++                            PhysxSchema.PhysxSurfaceVelocityAPI(prim).GetSurfaceVelocityAttr().Set(
++                                velocity_vec3
++                            )
++        try:
++            from pxr import Gf
++            _set_conveyor_surface_velocity(Gf.Vec3f(*speed))
++            print(f"[SceneBuilder] 传送带已启动，设置速度为 {speed}")
+ 
++        except Exception as e:
++            print(f"[SceneBuilder] 传送带启动失败: {e}")
+             
+ 
+-
+     def reset(self):
+         """重置场景状态，所有任务的物体恢复到初始随机化/固定位置"""
+         task = self.cfg['task_number']
+@@ -1087,24 +1109,9 @@ class SceneBuilder:
+ 
+         # ── 任务2重置：传送带零件恢复初始位置 + 重新随机排列顺序 ──
+         if task == 2:
+-            # 传送带表面速度：Isaac Sim 5.1 / PhysX 107 使用 PhysxSurfaceVelocityAPI（Vector3f）。
+-            def _set_conveyor_surface_velocity(velocity_vec3) -> None:
+-                import omni.usd
+-                from pxr import PhysxSchema
+-                stage = omni.usd.get_context().get_stage()
+-                for prim in stage.Traverse():
+-                    if "ConveyorBelt" not in str(prim.GetPath()):
+-                        continue
+-                    if prim.HasAPI(PhysxSchema.PhysxSurfaceVelocityAPI):
+-                        PhysxSchema.PhysxSurfaceVelocityAPI(prim).GetSurfaceVelocityAttr().Set(
+-                            velocity_vec3
+-                        )
+ 
+-            try:
+-                from pxr import Gf
+-                _set_conveyor_surface_velocity(Gf.Vec3f(0.0, 0.0, 0.0))
+-            except Exception as e:
+-                print(f"[SceneBuilder] 传送带停止失败: {e}")
++            #停止传送带
++            self.set_conveyor_speed([0.0,0.0,0.0])
+ 
+             # 官方标准：10个零件（5A + 5B）
+             random_indices = np.random.permutation(np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]))
+@@ -1121,11 +1128,9 @@ class SceneBuilder:
+             self.rigid_prim.set_velocities(velocities=np.zeros((10, 6)))
+ 
+             # 重新启动传送带（沿 X 轴正方向，速度 0.1 m/s）
+-            try:
+-                from pxr import Gf
+-                _set_conveyor_surface_velocity(Gf.Vec3f(0.1, 0.0, 0.0))
+-            except Exception as e:
+-                print(f"[SceneBuilder] 传送带重启失败: {e}")
++
++            Conveyor_speed=self.ConveyorBelt_cfg['ConveyorBelt_speed']
++            self.set_conveyor_speed(Conveyor_speed)
+ 
+             self.save_parts_poses()
+             self._reset_boxes()
+diff --git a/lerobot/common/robot_devices/robots/head_stereo_visualizer.py b/lerobot/common/robot_devices/robots/head_stereo_visualizer.py
+old mode 100644
+new mode 100755
+-- 
+2.34.1
+
