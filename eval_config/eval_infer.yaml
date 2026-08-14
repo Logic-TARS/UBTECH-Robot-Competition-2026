@@ -43,7 +43,7 @@ task_policy_paths:                  # [条件必填] run_eval.sh all 跑四个�
   task1: ../challenge2026_baseline/task1/act/checkpoints/160000/pretrained_model
   task2: ../challenge2026_baseline/task2/act/checkpoints/050000/pretrained_model
   task3: ../challenge2026_baseline/task3/act/checkpoints/100000/pretrained_model
-  task4: ../challenge2026_baseline/task4/act/pretrained_model
+  task4: ../challenge2026_baseline/task4/act_001/checkpoints/100000/pretrained_model
                                     # 请把上面四行改成你的真实权重目录；相对路径按 eval_config/ 解析
 
 # ---- WebSocket 服务（infer 监听端）----

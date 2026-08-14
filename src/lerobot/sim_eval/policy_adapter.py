@@ -34,6 +34,8 @@ from typing import Any
 import numpy as np
 import torch
 
+from src.lerobot.utils.constants import OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS
+
 from .common import load_policy, obs_to_tensor
 
 logger = logging.getLogger(__name__)
@@ -121,6 +123,7 @@ class LeRobotPolicyAdapter(PolicyAdapter):
     def __init__(self) -> None:
         self.policy: Any | None = None
         self.policy_device: torch.device | None = None
+        self.language_tokenizer: Any | None = None
         self.policy_type = ""
         self.task = ""
         self.task_text = ""
@@ -143,6 +146,7 @@ class LeRobotPolicyAdapter(PolicyAdapter):
         self.task_text = str(config.get("task_text", ""))
         self.policy = load_policy(model_path, policy_type, device)
         self.policy_device = next(self.policy.parameters()).device
+        self._init_language_tokenizer_if_needed()
         logger.info("LeRobot policy 已加载，device=%s", self.policy_device)
 
     def predict(
@@ -166,6 +170,7 @@ class LeRobotPolicyAdapter(PolicyAdapter):
         obs_tensor = obs_to_tensor(observation, str(self.policy_device))
         self._trim_state_to_policy(obs_tensor)
         obs_tensor["task"] = [context.task_text or self.task_text]
+        self._add_language_tokens_if_needed(obs_tensor, context)
 
         action = self.policy.select_action(obs_tensor)
         action = action.to(self.policy_device)
@@ -189,6 +194,7 @@ class LeRobotPolicyAdapter(PolicyAdapter):
 
         self.policy = None
         self.policy_device = None
+        self.language_tokenizer = None
 
     def _trim_state_to_policy(self, observation: dict[str, torch.Tensor]) -> None:
         """根据 policy 期望维度裁剪 observation.state。
@@ -213,6 +219,67 @@ class LeRobotPolicyAdapter(PolicyAdapter):
 
         if expected_dim is not None and state.shape[-1] > expected_dim:
             observation["observation.state"] = state[..., :expected_dim]
+
+    def _init_language_tokenizer_if_needed(self) -> None:
+        """Initialize tokenizer for VLA policies whose select_action expects token tensors."""
+
+        if self.policy is None:
+            return
+        config = getattr(self.policy, "config", None)
+        input_features = getattr(config, "input_features", None)
+        needs_language = self.policy_type in {"smolvla", "pi0", "pi05", "pi0_fast", "xvla"} or (
+            isinstance(input_features, dict) and OBS_LANGUAGE_TOKENS in input_features
+        )
+        if not needs_language:
+            return
+
+        tokenizer_name = getattr(config, "vlm_model_name", None)
+        if not tokenizer_name:
+            logger.warning("policy 需要语言 token，但 config 缺少 vlm_model_name")
+            return
+
+        from transformers import AutoTokenizer
+
+        self.language_tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+    def _add_language_tokens_if_needed(
+        self,
+        observation: dict[str, torch.Tensor],
+        context: InferenceContext,
+    ) -> None:
+        """Add language token tensors expected by VLA policies such as SmolVLA."""
+
+        if self.policy is None or self.policy_device is None:
+            return
+        config = getattr(self.policy, "config", None)
+        input_features = getattr(config, "input_features", None)
+        needs_language = self.policy_type in {"smolvla", "pi0", "pi05", "pi0_fast", "xvla"} or (
+            isinstance(input_features, dict) and OBS_LANGUAGE_TOKENS in input_features
+        )
+        if not needs_language:
+            return
+        if OBS_LANGUAGE_TOKENS in observation and OBS_LANGUAGE_ATTENTION_MASK in observation:
+            return
+        if self.language_tokenizer is None:
+            raise RuntimeError("policy 需要语言 token，但 tokenizer 未初始化")
+
+        task_text = context.task_text or self.task_text or self.task
+        if self.policy_type in {"smolvla", "pi0"} and not task_text.endswith("\n"):
+            task_text = f"{task_text}\n"
+
+        tokenized = self.language_tokenizer(
+            [task_text],
+            max_length=int(getattr(config, "tokenizer_max_length", 48)),
+            truncation=True,
+            padding=getattr(config, "pad_language_to", "max_length"),
+            padding_side="right",
+            return_tensors="pt",
+        )
+        observation[OBS_LANGUAGE_TOKENS] = tokenized["input_ids"].to(self.policy_device)
+        observation[OBS_LANGUAGE_ATTENTION_MASK] = tokenized["attention_mask"].to(
+            device=self.policy_device,
+            dtype=torch.bool,
+        )
 
 
 def load_adapter_class(class_path: str) -> type[PolicyAdapter]:

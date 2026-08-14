@@ -59,6 +59,8 @@ read_yaml_scalar() {
             $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
                 sub(/^[[:space:]]+/, "", $2)
                 sub(/[[:space:]]+$/, "", $2)
+                sub(/[[:space:]]+#.*$/, "", $2)
+                sub(/[[:space:]]+$/, "", $2)
                 print $2
                 exit
             }

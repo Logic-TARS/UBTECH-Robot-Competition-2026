@@ -1,0 +1,24 @@
+# infer 容器配置：task2 SmolVLA 20w checkpoint
+
+task: task2
+task_text: null
+task_config_path: null
+
+device: cuda:0
+
+adapter_type: lerobot
+adapter_class: null
+adapter_config: {}
+
+policy_type: smolvla
+policy_path: ../outputs/train_task2_smolvla_vlm_unfrozen_20w/checkpoints/200000/pretrained_model
+require_task_policy_paths: false
+task_policy_paths:
+  task2: ../outputs/train_task2_smolvla_vlm_unfrozen_20w/checkpoints/200000/pretrained_model
+
+websocket_server_host: 0.0.0.0
+websocket_control_port: 8765
+websocket_stream_port: 8766
+heartbeat_interval: 5.0
+connection_timeout: 30.0
+websocket_max_size_bytes: null

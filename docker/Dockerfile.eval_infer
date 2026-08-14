@@ -6,6 +6,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG APP_DIR=/workspace/eval
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/ubuntu
 
 ENV DEBIAN_FRONTEND=noninteractive \
     ACCEPT_EULA=Y \
@@ -14,6 +15,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=${APP_DIR}
 
 USER root
+
+RUN if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then \
+        sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list.d/ubuntu.sources; \
+    elif [[ -f /etc/apt/sources.list ]]; then \
+        sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list; \
+    fi
 
 RUN mkdir -p /var/lib/apt/lists/partial \
     && apt-get update && apt-get install -y --no-install-recommends \
