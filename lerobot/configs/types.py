@@ -15,6 +15,7 @@
 # https://stackoverflow.com/questions/24481852/serialising-an-enum-member-to-json
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 
 class FeatureType(str, Enum):
@@ -50,3 +51,7 @@ class RTCAttentionSchedule(str, Enum):
     ONES = "ONES"
     LINEAR = "LINEAR"
     EXP = "EXP"
+
+
+# Alias for nested dict-like structures (e.g. flattened dataset info dicts)
+DictLike = dict[str, Any]
